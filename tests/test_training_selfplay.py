@@ -83,7 +83,7 @@ def stub_components(monkeypatch):
 def test_build_trainer_without_self_play(dataset_file):
     config = {
         "model": {"model_id": "stub-model", "quantization": None},
-        "self_play": {"enabled": False},
+        "self_play": {"enabled": True},
         "training": {"lr": 1e-5, "warmup_ratio": 0.0, "weight_decay": 0.0},
         "rlhf": {
             "num_generations": 2,

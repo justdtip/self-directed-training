@@ -75,7 +75,7 @@ def build_trainer(config: Any) -> GRPOTrainer:
         max_prompt_length=max_prompt_len,
         max_completion_length=max_completion_len,
         importance_sampling_level=str(rlhf_cfg["importance_sampling_level"]),
-        epsilon=float(rlhf_cfg["clip_range_ratio"]),
+        clip_range_ratio=float(rlhf_cfg["clip_range_ratio"]),
         temperature=float(rlhf_cfg["temperature"]),
         top_p=float(rlhf_cfg["top_p"]),
     )
@@ -144,9 +144,10 @@ def build_trainer(config: Any) -> GRPOTrainer:
 
         return base_scores
 
+    # GRPOTrainer expects the tokenizer argument rather than processing_class.
     trainer = GRPOTrainer(
         model=model,
-        processing_class=tokenizer,
+        tokenizer=tokenizer,
         args=grpo_cfg,
         train_dataset=train_dataset,
         reward_funcs=[reward_fn],

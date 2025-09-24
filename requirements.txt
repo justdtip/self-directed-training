@@ -1,0 +1,14 @@
+torch
+transformers>=4.43.0
+trl>=0.23.0
+peft>=0.11.1
+accelerate>=0.33.0
+datasets>=2.19.0
+pyyaml>=6.0.1
+rich>=13.7.1
+tqdm
+requests
+beautifulsoup4
+readability-lxml
+duckduckgo_search
+bitsandbytes
