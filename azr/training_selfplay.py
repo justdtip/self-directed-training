@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional
 
+from inspect import signature
+
 from transformers import set_seed
+import torch
 from trl.trainer.grpo_trainer import GRPOConfig, GRPOTrainer
+
+_GRPO_SUPPORTS_CLIP_RANGE = "clip_range_ratio" in signature(GRPOConfig).parameters
+_GRPO_SUPPORTS_TOKENIZER_ARG = "tokenizer" in signature(GRPOTrainer.__init__).parameters
 
 from .config import AzrModelCfg, AzrSelfPlayCfg, AzrTrainingCfg, load_config
 from .data import load_dataset as load_data
@@ -50,9 +56,24 @@ def build_trainer(config: Any) -> GRPOTrainer:
 
     dataset_path = cfg_map.get("data", {}).get("train_path", _DEFAULT_DATA_PATH)
     samples = load_data(dataset_path)
+    if not samples:
+        raise ValueError(
+            f"No training prompts were loaded from {dataset_path}. Ensure the JSONL file has at least one entry."
+        )
 
     tokenizer = load_tokenizer(model_cfg.model_id)
-    model = setup_model(model_cfg, bf16=bool(rlhf_cfg["bf16"]))
+    bf16_requested = bool(rlhf_cfg["bf16"])
+    has_cuda = torch.cuda.is_available()
+    supports_bf16 = torch.cuda.is_bf16_supported() if has_cuda else False
+    bf16_flag = bf16_requested and has_cuda and supports_bf16
+    if bf16_requested and not bf16_flag:
+        try:
+            from .utils import console
+            reason = "CUDA is unavailable" if not has_cuda else "CUDA device lacks bfloat16 support"
+            console.print(f"[yellow]bf16 requested but {reason}; defaulting to float32.[/]")
+        except Exception:
+            pass
+    model = setup_model(model_cfg, bf16=bf16_flag)
 
     max_prompt_len = int(rlhf_cfg["max_prompt_length"])
     max_completion_len = int(rlhf_cfg["max_completion_length"])
@@ -63,22 +84,27 @@ def build_trainer(config: Any) -> GRPOTrainer:
 
     per_device_train_bs = max(1, int(rlhf_cfg["num_generations"]))
 
-    grpo_cfg = GRPOConfig(
+    grpo_kwargs = dict(
         per_device_train_batch_size=per_device_train_bs,
         gradient_accumulation_steps=int(rlhf_cfg["gradient_accumulation_steps"]),
         learning_rate=train_cfg.lr,
         logging_steps=5,
         warmup_ratio=train_cfg.warmup_ratio,
         weight_decay=train_cfg.weight_decay,
-        bf16=bool(rlhf_cfg["bf16"]),
+        bf16=bf16_flag,
         num_generations=int(rlhf_cfg["num_generations"]),
         max_prompt_length=max_prompt_len,
         max_completion_length=max_completion_len,
         importance_sampling_level=str(rlhf_cfg["importance_sampling_level"]),
-        clip_range_ratio=float(rlhf_cfg["clip_range_ratio"]),
         temperature=float(rlhf_cfg["temperature"]),
         top_p=float(rlhf_cfg["top_p"]),
     )
+    clip_value = float(rlhf_cfg["clip_range_ratio"])
+    if _GRPO_SUPPORTS_CLIP_RANGE:
+        grpo_kwargs["clip_range_ratio"] = clip_value
+    else:
+        grpo_kwargs["epsilon"] = clip_value
+    grpo_cfg = GRPOConfig(**grpo_kwargs)
 
     class PromptDataset:
         def __init__(self, rows) -> None:
@@ -144,14 +170,18 @@ def build_trainer(config: Any) -> GRPOTrainer:
 
         return base_scores
 
-    # GRPOTrainer expects the tokenizer argument rather than processing_class.
-    trainer = GRPOTrainer(
+    # Pass the tokenizer through whichever argument this TRL version supports.
+    trainer_kwargs = dict(
         model=model,
-        tokenizer=tokenizer,
         args=grpo_cfg,
         train_dataset=train_dataset,
         reward_funcs=[reward_fn],
     )
+    if _GRPO_SUPPORTS_TOKENIZER_ARG:
+        trainer_kwargs["tokenizer"] = tokenizer
+    else:
+        trainer_kwargs["processing_class"] = tokenizer
+    trainer = GRPOTrainer(**trainer_kwargs)
     return trainer
 
 

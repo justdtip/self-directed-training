@@ -1,0 +1,34 @@
+{
+  "model": {
+    "model_id": "deepcogito/cogito-v1-preview-llama-8b",
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "quantization": "4bit"
+  },
+  "rlhf": {
+    "num_generations": 4,
+    "max_prompt_length": 2048,
+    "max_completion_length": 1024,
+    "importance_sampling_level": "sequence",
+    "clip_range_ratio": 0.1,
+    "kl_coeff": 0.0,
+    "bf16": true,
+    "gradient_accumulation_steps": 8,
+    "temperature": 0.7,
+    "top_p": 0.95
+  },
+  "training": {
+    "lr": 1e-05,
+    "warmup_ratio": 0.03,
+    "weight_decay": 0.0
+  },
+  "self_play": {
+    "enabled": true,
+    "weight": 0.2,
+    "device": "cuda:1",
+    "update_every": 500
+  },
+  "data": {
+    "train_path": "azr/data/train.jsonl"
+  }
+}
