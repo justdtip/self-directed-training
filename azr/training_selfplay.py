@@ -41,24 +41,14 @@ class _EnsureLmHeadDtype(TrainerCallback):
         model = kwargs.get("model")
         if model is not None:
             self._align(model)
-        else:
-            try:
-                from .utils import console
-                console.print("[yellow]DEBUG_LM_HEAD_CB: model missing on_train_begin kwargs -> {kwargs.keys()}")
-            except Exception:
-                pass
+        if model is not None:
+            self._align(model)
         return control
 
     def on_step_begin(self, args, state, control, **kwargs):
         model = kwargs.get("model")
         if model is not None:
             self._align(model)
-        else:
-            try:
-                from .utils import console
-                console.print("[yellow]DEBUG_LM_HEAD_CB: model missing on_step_begin kwargs -> {kwargs.keys()}")
-            except Exception:
-                pass
         return control
 
 

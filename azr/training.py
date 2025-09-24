@@ -6,6 +6,39 @@ from typing import Any, Dict, List, Optional
 
 import torch
 from trl.trainer.grpo_trainer import GRPOConfig, GRPOTrainer
+from transformers.trainer_callback import TrainerCallback
+
+
+class _EnsureLmHeadDtype(TrainerCallback):
+    """Align the lm_head dtype with the rest of the model to avoid Float/BFloat16 mismatches."""
+
+    def _align(self, model) -> None:
+        if not hasattr(model, "lm_head"):
+            return
+        try:
+            param_dtype = next(model.parameters()).dtype
+        except StopIteration:
+            return
+
+        lm_head = model.lm_head
+        weight = getattr(lm_head, "weight", None)
+        if weight is not None and weight.dtype != param_dtype:
+            weight.data = weight.data.to(param_dtype)
+        bias = getattr(lm_head, "bias", None)
+        if bias is not None and bias.dtype != param_dtype:
+            bias.data = bias.data.to(param_dtype)
+
+    def on_train_begin(self, args, state, control, **kwargs):  # type: ignore[override]
+        model = kwargs.get("model")
+        if model is not None:
+            self._align(model)
+        return control
+
+    def on_step_begin(self, args, state, control, **kwargs):  # type: ignore[override]
+        model = kwargs.get("model")
+        if model is not None:
+            self._align(model)
+        return control
 
 from .config import AzrModelCfg, AzrTrainingCfg
 from .data import DataExample, load_dataset
@@ -152,6 +185,8 @@ def build_trainer(
         args=grpo_cfg,
         train_dataset=dataset,
     )
+    # Align lm_head dtype with the model's parameters to avoid Float/BFloat16 errors.
+    trainer.add_callback(_EnsureLmHeadDtype())
     return trainer
 
 
