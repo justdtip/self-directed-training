@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
+import torch
+
 from .config import AzrModelCfg
 from .utils import console
 
@@ -22,7 +24,6 @@ def setup_model(
     bf16: bool = False,
     target_modules: Optional[Iterable[str]] = None,
 ) -> object:
-    import torch
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
@@ -63,4 +64,7 @@ def setup_model(
         task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, peft_cfg)
+    # After adding LoRA adapters, cast the whole model to bfloat16 to avoid dtype mismatches (e.g., lm_head stays float32).
+    if bf16:
+        model = model.to(dtype=torch.bfloat16)
     return model

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Mapping, Optional
 from inspect import signature
 
 from transformers import set_seed
+from transformers.trainer_callback import TrainerCallback
 import torch
 from trl.trainer.grpo_trainer import GRPOConfig, GRPOTrainer
 
@@ -18,6 +19,48 @@ from .rewards import blended_reward
 from .selfplay_manager import SelfPlayManager
 
 _DEFAULT_DATA_PATH = "/opt/azr/data/train.jsonl"
+
+
+class _EnsureLmHeadDtype(TrainerCallback):
+    def _align(self, model):
+        if not hasattr(model, "lm_head"):
+            return
+        try:
+            param_dtype = next(model.parameters()).dtype
+        except StopIteration:
+            return
+        lm_head = model.lm_head
+        weight = getattr(lm_head, "weight", None)
+        if weight is not None and weight.dtype != param_dtype:
+            weight.data = weight.data.to(param_dtype)
+        bias = getattr(lm_head, "bias", None)
+        if bias is not None and bias.dtype != param_dtype:
+            bias.data = bias.data.to(param_dtype)
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        model = kwargs.get("model")
+        if model is not None:
+            self._align(model)
+        else:
+            try:
+                from .utils import console
+                console.print("[yellow]DEBUG_LM_HEAD_CB: model missing on_train_begin kwargs -> {kwargs.keys()}")
+            except Exception:
+                pass
+        return control
+
+    def on_step_begin(self, args, state, control, **kwargs):
+        model = kwargs.get("model")
+        if model is not None:
+            self._align(model)
+        else:
+            try:
+                from .utils import console
+                console.print("[yellow]DEBUG_LM_HEAD_CB: model missing on_step_begin kwargs -> {kwargs.keys()}")
+            except Exception:
+                pass
+        return control
+
 
 
 def _ensure_mapping(config: Any) -> Dict[str, Any]:
@@ -182,6 +225,7 @@ def build_trainer(config: Any) -> GRPOTrainer:
     else:
         trainer_kwargs["processing_class"] = tokenizer
     trainer = GRPOTrainer(**trainer_kwargs)
+    trainer.add_callback(_EnsureLmHeadDtype())
     return trainer
 
 
