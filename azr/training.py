@@ -1,26 +1,72 @@
 from __future__ import annotations
 
-import math
-from dataclasses import asdict
-from typing import List, Dict, Any
 import os
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 import torch
-from trl.trainer.grpo_trainer import GRPOTrainer, GRPOConfig
+from trl.trainer.grpo_trainer import GRPOConfig, GRPOTrainer
 
-from .config import RootCfg
+from .config import AzrModelCfg, AzrTrainingCfg
+from .data import DataExample, load_dataset
 from .modeling import load_tokenizer, setup_model
-from .data import load_prompts_from_path
-from .rewards import keyword_reward, length_penalty, combine_rewards
+from .simple_rewards import combine_rewards, keyword_reward, length_penalty
 from .utils import console
 
 
-def build_trainer(cfg: RootCfg, dataset_path: str | None, output_dir: str, max_steps: int | None = None) -> GRPOTrainer:
-    azr = cfg.azr
-    tok = load_tokenizer(azr.model_id)
-    model = setup_model(azr)
+def _merge_rlhf(cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    defaults: Dict[str, Any] = {
+        "num_generations": 4,
+        "max_prompt_length": 1024,
+        "max_completion_length": 512,
+        "importance_sampling_level": "sequence",
+        "clip_range_ratio": 0.1,
+        "gradient_accumulation_steps": 1,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "bf16": False,
+    }
+    if cfg:
+        defaults.update({k: cfg[k] for k in cfg if cfg[k] is not None})
+    return defaults
 
-    # Debug: show trainable parameter counts to verify LoRA wiring
+
+def _default_examples() -> List[DataExample]:
+    return [
+        DataExample(
+            prompt="Explain what RLHF is in one sentence.",
+            tests=[],
+            timeout_s=2,
+            memory_mb=256,
+        ),
+        DataExample(
+            prompt="List two benefits of LoRA for LLM fine-tuning.",
+            tests=[],
+            timeout_s=2,
+            memory_mb=256,
+        ),
+    ]
+
+
+def build_trainer(
+    config: Dict[str, Any],
+    dataset_path: Optional[str],
+    output_dir: str,
+    max_steps: Optional[int] = None,
+) -> GRPOTrainer:
+    """Build the standard GRPO trainer using the simplified configuration schema."""
+
+    model_cfg = AzrModelCfg.from_dict(config.get("model", {}))
+    training_cfg = AzrTrainingCfg.from_dict(config.get("training", {}))
+    rlhf_cfg = _merge_rlhf(config.get("rlhf"))
+
+    if not model_cfg.model_id:
+        raise ValueError("model.model_id must be specified in the configuration")
+
+    tokenizer = load_tokenizer(model_cfg.model_id)
+    model = setup_model(model_cfg, bf16=bool(rlhf_cfg["bf16"]))
+
+    # Debug information about parameters to confirm LoRA wiring
     try:
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -31,40 +77,61 @@ def build_trainer(cfg: RootCfg, dataset_path: str | None, output_dir: str, max_s
     except Exception:
         pass
 
-    ds = load_prompts_from_path(dataset_path)
+    if dataset_path:
+        examples = load_dataset(dataset_path)
+    else:
+        examples = []
 
-    # Combine training args + algorithm args in a single GRPOConfig
-    per_device_train_bs = max(1, azr.rlhf.num_generations)
-    lr = getattr(cfg, "training", None).lr if getattr(cfg, "training", None) else 5e-5
+    if not examples:
+        examples = _default_examples()
+
+    class PromptDataset:
+        def __init__(self, rows: List[DataExample]) -> None:
+            self.rows = rows
+
+        def __len__(self) -> int:
+            return len(self.rows)
+
+        def __getitem__(self, idx: int) -> Dict[str, Any]:
+            ex = self.rows[idx]
+            return {
+                "prompt": ex.prompt,
+                "tests": ex.tests,
+                "timeout_s": ex.timeout_s,
+                "memory_mb": ex.memory_mb,
+            }
+
+    dataset = PromptDataset(examples)
+
+    per_device_train_bs = max(1, int(rlhf_cfg["num_generations"]))
+    bf16_flag = bool(rlhf_cfg["bf16"]) and torch.cuda.is_available()
+
     grpo_cfg = GRPOConfig(
         output_dir=output_dir,
         per_device_train_batch_size=per_device_train_bs,
-        gradient_accumulation_steps=azr.rlhf.gradient_accumulation_steps,
-        learning_rate=lr,
+        gradient_accumulation_steps=int(rlhf_cfg["gradient_accumulation_steps"]),
+        learning_rate=training_cfg.lr,
         logging_steps=1,
         save_steps=10,
         max_steps=max_steps or 10,
-        bf16=azr.rlhf.bf16 and torch.cuda.is_available(),
+        bf16=bf16_flag,
         report_to=[],
-        warmup_ratio=getattr(cfg.training, "warmup_ratio", 0.0) if getattr(cfg, "training", None) else 0.0,
-        weight_decay=getattr(cfg.training, "weight_decay", 0.0) if getattr(cfg, "training", None) else 0.0,
-        # Generation / sampling & algo params
-        num_generations=azr.rlhf.num_generations,
-        max_prompt_length=azr.rlhf.max_prompt_length,
-        max_completion_length=azr.rlhf.max_completion_length,
-        importance_sampling_level=azr.rlhf.importance_sampling_level,
-        epsilon=azr.rlhf.clip_range_ratio,
-        temperature=getattr(azr.rlhf, "temperature", 1.0),
-        top_p=getattr(azr.rlhf, "top_p", 1.0),
+        warmup_ratio=training_cfg.warmup_ratio,
+        weight_decay=training_cfg.weight_decay,
+        num_generations=int(rlhf_cfg["num_generations"]),
+        max_prompt_length=int(rlhf_cfg["max_prompt_length"]),
+        max_completion_length=int(rlhf_cfg["max_completion_length"]),
+        importance_sampling_level=str(rlhf_cfg["importance_sampling_level"]),
+        epsilon=float(rlhf_cfg["clip_range_ratio"]),
+        temperature=float(rlhf_cfg["temperature"]),
+        top_p=float(rlhf_cfg["top_p"]),
     )
 
-    def reward_fn(prompts: List[str], completions: List[str], **kwargs) -> List[float]:
-        # Combine simple keyword and length rewards as a placeholder
+    def reward_fn(prompts: List[str], completions: List[str], **_: Any) -> List[float]:
         kw = keyword_reward(completions)
-        lp = length_penalty(completions, max_len=azr.rlhf.max_completion_length)
+        lp = length_penalty(completions, max_len=int(rlhf_cfg["max_completion_length"]))
         rewards = combine_rewards(kw, lp)
 
-        # Optional debug: print reward stats to help diagnose zero-loss issues
         if os.getenv("AZR_DEBUG_REWARDS"):
             try:
                 n = len(rewards)
@@ -80,9 +147,12 @@ def build_trainer(cfg: RootCfg, dataset_path: str | None, output_dir: str, max_s
 
     trainer = GRPOTrainer(
         model=model,
-        processing_class=tok,
-        reward_funcs=[reward_fn],  # sequence-level rewards
+        processing_class=tokenizer,
+        reward_funcs=[reward_fn],
         args=grpo_cfg,
-        train_dataset=ds,
+        train_dataset=dataset,
     )
     return trainer
+
+
+__all__ = ["build_trainer"]

@@ -1,0 +1,50 @@
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "python.run",
+        "description": "Execute arbitrary Python 3 code. Returns stdout, stderr and returncode.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "code": {"type": "string"},
+            "timeout_s": {"type": "integer", "minimum": 1, "maximum": 30, "default": 2},
+            "memory_mb": {"type": "integer", "minimum": 64, "maximum": 1024, "default": 256}
+          },
+          "required": ["code"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web.search",
+        "description": "Search the web using DuckDuckGo. Returns a list of search results.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {"type": "string"},
+            "count": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5}
+          },
+          "required": ["query"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web.fetch",
+        "description": "Fetch a URL and return cleaned, readable text.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {"type": "string"},
+            "max_bytes": {"type": "integer", "minimum": 1024, "maximum": 2000000, "default": 800000}
+          },
+          "required": ["url"]
+        }
+      }
+    }
+  ]
+}

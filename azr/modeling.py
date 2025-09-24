@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Iterable, Optional
 
 from .config import AzrModelCfg
 from .utils import console
@@ -16,7 +16,12 @@ def load_tokenizer(model_id: str):
     return tok
 
 
-def setup_model(cfg: AzrModelCfg):
+def setup_model(
+    cfg: AzrModelCfg,
+    *,
+    bf16: bool = False,
+    target_modules: Optional[Iterable[str]] = None,
+) -> object:
     import torch
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -31,7 +36,7 @@ def setup_model(cfg: AzrModelCfg):
                 load_in_4bit=True,
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_use_double_quant=True,
-                bnb_4bit_compute_dtype=torch.bfloat16 if cfg.rlhf.bf16 else torch.float16,
+                bnb_4bit_compute_dtype=torch.bfloat16 if bf16 else torch.float16,
             )
         except Exception as e:
             console.print(f"[yellow]bitsandbytes not available or incompatible: {e}. Falling back to full precision.[/]")
@@ -41,22 +46,21 @@ def setup_model(cfg: AzrModelCfg):
         cfg.model_id,
         quantization_config=bnb_config,
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16 if cfg.rlhf.bf16 else None,
+        torch_dtype=torch.bfloat16 if bf16 else None,
         device_map="auto" if bnb_config is not None else None,
     )
 
     if bnb_config is not None:
         model = prepare_model_for_kbit_training(model)
 
-    lora = cfg.lora
+    modules = list(target_modules) if target_modules is not None else ["q_proj", "v_proj"]
     peft_cfg = LoraConfig(
-        r=lora.r,
-        lora_alpha=lora.alpha,
-        target_modules=lora.target_modules,
+        r=cfg.lora_r,
+        lora_alpha=cfg.lora_alpha,
+        target_modules=modules,
         lora_dropout=0.05,
         bias="none",
         task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, peft_cfg)
     return model
-

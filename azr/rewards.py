@@ -1,39 +1,92 @@
 from __future__ import annotations
 
-from typing import List, Sequence
+import re
+from typing import Dict, List, Tuple
+
+from .tools.python_tool import run_code
 
 
-def keyword_reward(outputs: Sequence[str], positive: Sequence[str] = ("helpful", "final"), negative: Sequence[str] = ("harmful",)) -> List[float]:
-    rewards: List[float] = []
-    for out in outputs:
-        score = 0.0
-        low = out.lower()
-        for k in positive:
-            if k in low:
-                score += 0.5
-        for k in negative:
-            if k in low:
-                score -= 0.75
-        rewards.append(score)
-    return rewards
+def extract_last_code_block(text: str) -> str | None:
+    """
+    Return the contents of the last fenced code block in ``text``.
+    Supports ```...``` or ```python ...``` fences.
+    """
+
+    blocks = re.findall(r"```(?:python)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    return blocks[-1] if blocks else None
 
 
-def length_penalty(outputs: Sequence[str], max_len: int = 256) -> List[float]:
-    res = []
-    for out in outputs:
-        over = max(0, len(out) - max_len)
-        res.append(-0.001 * over)
-    return res
+def score_code_tests(
+    model_output: str,
+    tests: List[str],
+    timeout_s: int = 2,
+    memory_mb: int = 256,
+) -> Tuple[float, Dict[str, int]]:
+    """
+    Execute extracted code against ``tests`` and compute the pass rate.
+    Returns (score, stats) where ``score`` ∈ [0, 1] and stats stores ``passes`` and ``total``.
+    """
+
+    total = len(tests)
+    if total == 0:
+        base = 0.1 if model_output and model_output.strip() else 0.0
+        return base, {"passes": 0, "total": 0}
+
+    code = extract_last_code_block(model_output)
+    if code is None:
+        return 0.0, {"passes": 0, "total": total}
+
+    passes = 0
+    for test in tests:
+        snippet = f"{code}\n\n{test}"
+        result = run_code(snippet, timeout_s=timeout_s, memory_mb=memory_mb)
+        ok = result.returncode == 0 and "AssertionError" not in (result.stderr or "")
+        passes += int(ok)
+
+    return passes / total, {"passes": passes, "total": total}
 
 
-def combine_rewards(*reward_lists: Sequence[float]) -> List[float]:
-    if not reward_lists:
-        return []
-    n = len(reward_lists[0])
-    res = [0.0] * n
-    for r in reward_lists:
-        assert len(r) == n, "All reward lists must be same length"
-        for i, v in enumerate(r):
-            res[i] += v
-    return res
+def style_penalty(model_output: str) -> float:
+    """Return a small bonus when the answer contains a final answer marker."""
 
+    lower = model_output.lower()
+    if "final answer" in lower:
+        return 0.05
+    if re.search(r"\{\s*\"?final_answer\"?", model_output):
+        return 0.05
+    return 0.0
+
+
+def timeout_penalty(stderr: str) -> float:
+    """Return a penalty when the python tool reports a timeout."""
+
+    return -0.05 if "TIMEOUT" in (stderr or "") else 0.0
+
+
+def blended_reward(
+    model_output: str,
+    tests: List[str],
+    extra: Dict | None = None,
+) -> Tuple[float, Dict[str, float]]:
+    """Combine code pass rate with minor style/timeout bonuses."""
+
+    timeout_s = extra.get("timeout_s", 2) if extra else 2
+    memory_mb = extra.get("memory_mb", 256) if extra else 256
+    base, stats = score_code_tests(model_output, tests, timeout_s=timeout_s, memory_mb=memory_mb)
+
+    bonus = style_penalty(model_output)
+    if extra and "stderr" in extra:
+        bonus += timeout_penalty(extra["stderr"])
+
+    score = max(0.0, min(1.0, base + bonus))
+    stats.update({"base": base, "bonus": bonus})
+    return score, stats
+
+
+__all__ = [
+    "extract_last_code_block",
+    "score_code_tests",
+    "style_penalty",
+    "timeout_penalty",
+    "blended_reward",
+]

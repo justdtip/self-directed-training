@@ -101,7 +101,7 @@ files:
             "type": "function",
             "function": {
               "name": "python.run",
-              "description": "Execute Python 3 code in an offline, jailed sandbox. Returns stdout/stderr/rc.",
+              "description": "Execute arbitrary Python 3 code. Returns stdout, stderr and returncode.",
               "parameters": {
                 "type": "object",
                 "properties": {
@@ -117,7 +117,7 @@ files:
             "type": "function",
             "function": {
               "name": "web.search",
-              "description": "Search the web (DuckDuckGo). Returns a list of results with title, href, snippet.",
+              "description": "Search the web using DuckDuckGo. Returns a list of search results.",
               "parameters": {
                 "type": "object",
                 "properties": {
@@ -132,7 +132,7 @@ files:
             "type": "function",
             "function": {
               "name": "web.fetch",
-              "description": "Fetch a URL and return readable text (best-effort). Use for research and citations.",
+              "description": "Fetch a URL and return cleaned, readable text.",
               "parameters": {
                 "type": "object",
                 "properties": {
