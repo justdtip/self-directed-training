@@ -1,0 +1,234 @@
+files:
+
+  - path: /usr/local/bin/sbx_py
+    mode: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # nsjail wrapper: offline, RAM/CPU limited; cwd=/tmp; read-only system.
+      set -euo pipefail
+      CODE_PATH="$1"; MEM_MB="${2:-256}"; TIME_S="${3:-2}"
+      exec nsjail -Mo \
+        --user 65534 --group 65534 \
+        --chroot / \
+        --cwd /tmp \
+        --iface_no_lo \
+        --disable_proc \
+        --rlimit_as $((MEM_MB*1024*1024)) \
+        --rlimit_stack $((64*1024*1024)) \
+        --rlimit_nofile 256 \
+        --rlimit_nproc 128 \
+        --rlimit_cpu "${TIME_S}" \
+        --time_limit "${TIME_S}" \
+        --bindmount_ro /usr --bindmount_ro /lib --bindmount_ro /lib64 \
+        --bindmount_rw /tmp \
+        -- /usr/bin/python3 "$CODE_PATH"
+
+  - path: /opt/azr/tool_harness.py
+    mode: "0644"
+    content: |
+      import os, subprocess, sys, tempfile, textwrap, resource, signal, shutil, json
+      def _limit_resources(memory_mb: int, cpu_s: int):
+          def preexec():
+              resource.setrlimit(resource.RLIMIT_AS, (memory_mb*1024*1024,)*2)
+              resource.setrlimit(resource.RLIMIT_CPU, (cpu_s, cpu_s))
+              resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
+              resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
+              os.setsid()
+          return preexec
+      def run_python(code: str, timeout_s: int = 2, memory_mb: int = 256):
+          wrapper = textwrap.dedent(f"{code}\n")
+          with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, dir="/tmp") as f:
+              f.write(wrapper); path = f.name
+          use_nsjail = shutil.which("nsjail") and os.path.exists("/usr/local/bin/sbx_py")
+          try:
+              if use_nsjail:
+                  p = subprocess.run(
+                      ["/usr/local/bin/sbx_py", path, str(memory_mb), str(timeout_s)],
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout_s+1
+                  )
+                  return {"stdout": p.stdout, "stderr": p.stderr, "returncode": p.returncode}
+              p = subprocess.run(
+                  [sys.executable, path],
+                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                  preexec_fn=_limit_resources(memory_mb, timeout_s), timeout=timeout_s
+              )
+              return {"stdout": p.stdout, "stderr": p.stderr, "returncode": p.returncode}
+          except subprocess.TimeoutExpired:
+              try: os.killpg(0, signal.SIGKILL)
+              except Exception: pass
+              return {"stdout": "", "stderr": "TIMEOUT", "returncode": 124}
+          finally:
+              try: os.remove(path)
+              except Exception: pass
+
+  - path: /opt/azr/tools/web_tool.py
+    mode: "0644"
+    content: |
+      import re, json, time, html, requests
+      from bs4 import BeautifulSoup
+      try:
+          from readability import Document
+      except Exception:
+          Document = None
+      UA = "AZR-Research/1.0 (+no-bots)"
+      def fetch_url(url: str, max_bytes: int = 800000, timeout: int = 15):
+          r = requests.get(url, headers={"User-Agent": UA}, timeout=timeout)
+          r.raise_for_status()
+          c = r.content[:max_bytes]
+          soup = BeautifulSoup(c, "html.parser")
+          text = soup.get_text(" ", strip=True)
+          if Document is not None and len(c) > 0:
+              try:
+                  doc = Document(c)
+                  text = BeautifulSoup(doc.summary(), "html.parser").get_text(" ", strip=True)
+              except Exception:
+                  pass
+          return {"url": url, "status": r.status_code, "text": text[:max_bytes]}
+      def search_ddg(query: str, count: int = 5):
+          from duckduckgo_search import DDGS
+          hits = []
+          with DDGS() as ddgs:
+              for i, r in enumerate(ddgs.text(query, max_results=count)):
+                  hits.append({"title": r.get("title",""), "href": r.get("href",""), "body": r.get("body","")})
+          return {"query": query, "results": hits}
+
+  - path: /opt/azr/tools/schema.json
+    mode: "0644"
+    content: |
+      {
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "python.run",
+              "description": "Execute Python 3 code in an offline, jailed sandbox. Returns stdout/stderr/rc.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "code": {"type":"string"},
+                  "timeout_s": {"type":"integer", "minimum": 1, "maximum": 30, "default": 2},
+                  "memory_mb": {"type":"integer", "minimum": 64, "maximum": 1024, "default": 256}
+                },
+                "required": ["code"]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "web.search",
+              "description": "Search the web (DuckDuckGo). Returns a list of results with title, href, snippet.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {"type":"string"},
+                  "count": {"type":"integer", "minimum": 1, "maximum": 10, "default": 5}
+                },
+                "required": ["query"]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "web.fetch",
+              "description": "Fetch a URL and return readable text (best-effort). Use for research and citations.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "url": {"type":"string"},
+                  "max_bytes": {"type":"integer", "minimum": 1024, "maximum": 2000000, "default": 800000}
+                },
+                "required": ["url"]
+              }
+            }
+          }
+        ]
+      }
+
+  - path: /opt/azr/train_selfplay_gspo.py
+    mode: "0644"
+    content: |
+      import os
+      from unsloth import FastLanguageModel
+      from trl.trainer.grpo_trainer import GRPOTrainer, GRPOConfig
+
+      # Tools
+      from opt_azr_params import PARAMS
+      from tool_harness import run_python
+      from tools.web_tool import search_ddg, fetch_url
+
+      def tool_call(name, args):
+          if name == "python.run":
+              return run_python(args["code"], args.get("timeout_s",2), args.get("memory_mb",256))
+          if name == "web.search":
+              return search_ddg(args["query"], args.get("count",5))
+          if name == "web.fetch":
+              return fetch_url(args["url"], args.get("max_bytes",800000))
+          raise ValueError(f"Unknown tool {name}")
+
+      def reward_fn(batch_prompts, policy_outputs, metadata):
+          rewards = []
+          for prompt, gen, meta in zip(batch_prompts, policy_outputs, metadata):
+              rewards.append(0.1 if (gen and len(gen.strip()) > 0) else 0.0)
+          return rewards
+
+      def main():
+          p = PARAMS
+          model_id = p["azr"]["model_id"]
+          qlora = p["azr"].get("quantization") == "4bit"
+          rlhf = p["azr"]["rlhf"]
+          training = p.get("training", {})
+          max_seq = rlhf["max_prompt_length"] + rlhf["max_completion_length"]
+
+          policy, tok = FastLanguageModel.from_pretrained(
+              model_id, max_seq_length=max_seq, load_in_4bit=qlora
+          )
+          lora = p["azr"]["lora"]
+          policy = FastLanguageModel.get_peft_model(policy, r=lora["r"], target_modules=lora["target_modules"])
+
+          per_device_train_bs = max(1, rlhf["num_generations"])  # ensure divisible by num_generations
+          cfg = GRPOConfig(
+              learning_rate=training.get("lr", 1e-5),
+              warmup_ratio=training.get("warmup_ratio", 0.0),
+              weight_decay=training.get("weight_decay", 0.0),
+              num_generations=rlhf["num_generations"],
+              max_prompt_length=rlhf["max_prompt_length"],
+              max_completion_length=rlhf["max_completion_length"],
+              per_device_train_batch_size=per_device_train_bs,
+              gradient_accumulation_steps=rlhf["gradient_accumulation_steps"],
+              logging_steps=5,
+              bf16=bool(rlhf.get("bf16", False)),
+              importance_sampling_level=rlhf["importance_sampling_level"],
+              epsilon=rlhf.get("clip_range_ratio", 0.1),
+              temperature=float(rlhf.get("temperature", 1.0)),
+              top_p=float(rlhf.get("top_p", 1.0)),
+          )
+
+          # Minimal prompt-only dataset for wiring; replace with your own.
+          ds = [{"prompt": "Solve: 2 + 2 =", "tests": []}] * 128
+
+          class DummyDS:
+              def __len__(self):
+                  return len(ds)
+
+              def __getitem__(self, i):
+                  return {"prompt": ds[i]["prompt"], "tests": ds[i]["tests"]}
+
+          trainer = GRPOTrainer(
+              model=policy,
+              processing_class=tok,
+              args=cfg,
+              train_dataset=DummyDS(),
+              reward_funcs=[reward_fn],
+          )
+          trainer.train()
+
+      if __name__ == "__main__":
+          main()
+
+  - path: /opt/azr/opt_azr_params.py
+    mode: "0644"
+    content: |
+      import yaml, os
+      PARAMS = yaml.safe_load(open(os.environ.get("AZR_PARAMS", "/opt/azr/azr.params.yaml")))  # noqa

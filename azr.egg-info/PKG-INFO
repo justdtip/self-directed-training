@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: azr
+Version: 0.1.0
+Summary: AZR RLHF training harness with GRPO/QLoRA and tool sandbox
+Author-email: AZR Research <devnull@example.com>
+Requires-Python: >=3.9
+Requires-Dist: transformers>=4.43.0
+Requires-Dist: trl>=0.23.0
+Requires-Dist: peft>=0.11.1
+Requires-Dist: accelerate>=0.33.0
+Requires-Dist: datasets>=2.19.0
+Requires-Dist: pyyaml>=6.0.1
+Requires-Dist: rich>=13.7.1
+Requires-Dist: tqdm
+Requires-Dist: requests

@@ -1,0 +1,9 @@
+steps:
+  - name: Train RL with GSPO + self-play
+    run: |
+      . /opt/azr/venv/bin/activate
+      export HF_HOME=/workspace/.cache/huggingface
+      export TOKENIZERS_PARALLELISM=false
+      export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      export VLLM_ATTENTION_BACKEND=FLASHINFER
+      AZR_PARAMS=/opt/azr/azr.params.yaml python /opt/azr/rl_train_gspo_selfplay.py

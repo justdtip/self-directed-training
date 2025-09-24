@@ -1,0 +1,65 @@
+steps:
+  - name: Write the YAML files you saved to disk into place
+    run: |
+      set -e
+      test -f azr.params.yaml
+      test -f azr.bootstrap.yaml
+      test -f azr.files.yaml
+      test -f azr.symlink.yaml
+
+  - name: Execute bootstrap
+    run: |
+      set -e
+      # Execute the commands defined in bootstrap YAML (simple runner)
+      python - <<'PY'
+      import yaml, subprocess, sys
+      for step in yaml.safe_load(open("azr.bootstrap.yaml"))["steps"]:
+          print(f"\n[BOOTSTRAP] {step['name']}")
+          subprocess.run(step["run"], shell=True, check=True)
+      PY
+
+  - name: Materialize files
+    run: |
+      set -e
+      . /opt/azr/venv/bin/activate
+      python - <<'PY'
+      import yaml, os, stat, json
+      spec = yaml.safe_load(open("azr.files.yaml"))
+      for f in spec["files"]:
+          os.makedirs(os.path.dirname(f["path"]), exist_ok=True)
+          with open(f["path"], "w") as out:
+              out.write(f["content"])
+          if "mode" in f:
+              os.chmod(f["path"], int(f["mode"], 8))
+      print("[FILES] wrote", len(spec["files"]), "files.")
+      PY
+
+  - name: Link params file
+    run: |
+      set -e
+      python - <<'PY'
+      import yaml, subprocess
+      spec = yaml.safe_load(open("azr.symlink.yaml"))
+      for step in spec["steps"]:
+          subprocess.run(step["run"], shell=True, check=True)
+      PY
+
+  - name: Quick smoke tests (sandbox + web)
+    run: |
+      set -e
+      . /opt/azr/venv/bin/activate
+      python - <<'PY'
+      import sys; sys.path.insert(0, "/opt/azr")
+      from tool_harness import run_python
+      from tools.web_tool import search_ddg, fetch_url
+      print("[SBX OK]", run_python("print(2+2)"))
+      print("[SBX TIMEOUT]", run_python("import time; time.sleep(5)", timeout_s=1))
+      print("[WEB SEARCH]", search_ddg("site:huggingface.co deepcogito cogito v1", 2))
+      print("[WEB FETCH]", fetch_url("https://example.com", 1024))
+      PY
+
+  - name: Start a demo training run (replace with your dataset later)
+    run: |
+      set -e
+      . /opt/azr/venv/bin/activate
+      AZR_PARAMS=/opt/azr/azr.params.yaml python /opt/azr/train_selfplay_gspo.py

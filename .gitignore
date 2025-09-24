@@ -1,0 +1,61 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual environments and local tooling
+.venv/
+.venv-backups/
+.env
+.env.*
+.hf_home/
+
+# Data and generated artifacts
+/data/
+/datasets/
+/outputs/
+/cache/
+/tmp/
+/tmp_*/
+/logs/
+/wandb/
+/mlruns/
+/tensorboard/
+/lightning_logs/
+
+# Training checkpoints and large binary weights
+checkpoints/
+*.ckpt
+*.ckpt.*
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+*.h5
+*.tflite
+*.pb
+*.npz
+*.npy
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.rar
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ensure model configuration files stay tracked
+!*/config.json
+!*/config.yaml
+!*/config.yml
+!*/tokenizer.json
+!*/tokenizer_config.json
+!*/special_tokens_map.json
+!*/merges.txt
+!*/vocab.json
+!*/sentencepiece.bpe.model
+!*/tokenizer.model

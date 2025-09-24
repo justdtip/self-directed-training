@@ -1,0 +1,58 @@
+steps:
+  - name: Detect OS
+    run: |
+      set -e
+      echo "[OS INFO]"; cat /etc/os-release || true
+      echo "[GPU INFO]"; nvidia-smi || true
+
+  - name: System deps (nsjail + Chromium for Playwright)
+    run: |
+      set -e
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-pip \
+        git curl ca-certificates build-essential \
+        nsjail libcap2-bin procps \
+        chromium fonts-liberation libnss3 libasound2 libxkbfile1 libxrandr2 libgtk-3-0 \
+        wget unzip
+      rm -rf /var/lib/apt/lists/*
+
+  - name: Create venv
+    run: |
+      set -e
+      mkdir -p /opt/azr
+      python3 -m venv /opt/azr/venv
+      . /opt/azr/venv/bin/activate
+      python -V
+      pip install --upgrade pip wheel setuptools
+
+  - name: Install PyTorch + core libs (choose CUDA wheel automatically)
+    run: |
+      set -e
+      . /opt/azr/venv/bin/activate
+      # Try CUDA 12.1 wheels first; fall back to default if not present.
+      (pip install --extra-index-url https://download.pytorch.org/whl/cu121 \
+        torch torchvision torchaudio) || \
+      pip install torch torchvision torchaudio
+      python -c "import torch, sys; print('[Torch]', torch.__version__, 'CUDA:', torch.version.cuda, 'IsCUDA:', torch.cuda.is_available()); sys.exit(0 if torch.cuda.is_available() else 1)" || \
+      (echo 'CUDA not available in container.' >&2; exit 1)
+
+  - name: Install LLM stack (Unsloth, TRL, vLLM, extras)
+    run: |
+      set -e
+      . /opt/azr/venv/bin/activate
+      pip install \
+        "unsloth>=2024.9.0" "transformers>=4.42" "accelerate>=0.31" "datasets>=2.19" \
+        "peft>=0.11" "trl>=0.9" \
+        "vllm>=0.6.0" "tiktoken" "einops" "sentencepiece" \
+        "duckduckgo_search>=6.2.12" "readability-lxml" "beautifulsoup4" "lxml" "html5lib"
+      # FlashAttention (optional but fast on Ada). If this fails, you can skip.
+      pip install "flash-attn>=2.6.3" --no-build-isolation || true
+
+  - name: Install Playwright (web tool backend)
+    run: |
+      set -e
+      . /opt/azr/venv/bin/activate
+      pip install "playwright>=1.46"
+      python -m playwright install chromium --with-deps

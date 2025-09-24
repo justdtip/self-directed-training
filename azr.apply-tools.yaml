@@ -1,0 +1,27 @@
+steps:
+  - name: Ensure venv + deps
+    run: |
+      . /opt/azr/venv/bin/activate
+      pip install --upgrade pip
+      pip install requests duckduckgo_search readability-lxml beautifulsoup4 lxml html5lib
+
+  - name: Materialize files
+    run: |
+      python3 -c "import yaml, os, stat
+      spec = yaml.safe_load(open('azr.tools-train.impl.yaml'))
+      for f in spec['files']:
+          os.makedirs(os.path.dirname(f['path']), exist_ok=True)
+          with open(f['path'], 'w', encoding='utf-8') as out:
+              out.write(f['content'])
+          if 'mode' in f:
+              os.chmod(f['path'], int(f['mode'], 8))
+      print('[OK] Wrote', len(spec['files']), 'files.')"
+
+  - name: Link params into /opt/azr
+    run: |
+      cp azr.params.yaml /opt/azr/azr.params.yaml
+
+  - name: Smoke tests
+    run: |
+      . /opt/azr/venv/bin/activate
+      python /opt/azr/run_smoke.py

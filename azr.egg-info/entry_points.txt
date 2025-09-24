@@ -1,0 +1,4 @@
+[console_scripts]
+azr-eval = azr.cli:eval_cmd
+azr-gen = azr.cli:gen_cmd
+azr-train = azr.cli:train_cmd

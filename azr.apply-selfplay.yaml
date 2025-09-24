@@ -1,0 +1,18 @@
+steps:
+  - name: Write/overwrite self-play files
+    run: |
+      python3 - <<'PY'
+import yaml, os
+spec = yaml.safe_load(open('azr.selfplay.impl.yaml'))
+for entry in spec['files']:
+    os.makedirs(os.path.dirname(entry['path']), exist_ok=True)
+    with open(entry['path'], 'w', encoding='utf-8') as fh:
+        fh.write(entry['content'])
+    if 'mode' in entry:
+        os.chmod(entry['path'], int(entry['mode'], 8))
+print('[OK] wrote', len(spec['files']), 'files.')
+PY
+
+  - name: Refresh params
+    run: |
+      cp azr.params.yaml /opt/azr/azr.params.yaml

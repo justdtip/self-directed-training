@@ -1,0 +1,6 @@
+steps:
+  - name: Link params into /opt/azr
+    run: |
+      set -e
+      mkdir -p /opt/azr
+      cp azr.params.yaml /opt/azr/azr.params.yaml
