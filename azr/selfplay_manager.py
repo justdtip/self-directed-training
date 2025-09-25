@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 
+import asyncio
 import torch
 
 from .tools.python_tool import run_code
 from .rewards import extract_last_code_block, score_code_tests
 from .modeling import load_tokenizer, setup_model
-from .config import AzrModelCfg
+from .config import AzrModelCfg, AzrSelfPlayCfg
+from .opponent_provider_together import TogetherAIOpponentProvider
 
 
 @dataclass
@@ -23,32 +25,70 @@ class SelfPlayManager:
     Frozen opponent on a specified device. Generates outputs and computes win/loss scores.
     """
 
-    def __init__(self, cfg: AzrModelCfg, opponent_device: str = "cuda:1", *, log_intersteps: bool = False) -> None:
+    def __init__(
+        self,
+        cfg: AzrModelCfg,
+        sp_cfg: Optional[AzrSelfPlayCfg] = None,
+        opponent_device: str = "cuda:1",
+        *,
+        log_intersteps: bool = False,
+    ) -> None:
         self.cfg = cfg
+        self.sp_cfg = sp_cfg
         self.opponent_device = opponent_device
         self.log_intersteps = log_intersteps
+
+        opp_info = (sp_cfg.opponent if sp_cfg and sp_cfg.opponent else {})
+        self.remote_provider: Optional[TogetherAIOpponentProvider] = None
+
         self.op_tok = load_tokenizer(cfg.model_id)
-        self.opponent = setup_model(cfg)
-        try:
-            self.primary_device = next(self.opponent.parameters()).device
-        except StopIteration:
-            self.primary_device = torch.device(opponent_device if torch.cuda.is_available() else "cpu")
+
+        if opp_info.get("source") == "remote":
+            provider = opp_info.get("provider")
+            if provider != "together_ai":
+                raise ValueError(f"Unsupported opponent provider: {provider}")
+            self.remote_provider = TogetherAIOpponentProvider(
+                endpoint=opp_info["endpoint"],
+                model_id=opp_info["model_id"],
+                api_key_env=opp_info["api_key_env"],
+                max_concurrency=opp_info.get("max_concurrency", 5),
+                temperature=opp_info.get("temperature", 0.7),
+                top_p=opp_info.get("top_p", 0.95),
+            )
+            self.opponent = None
+            self.primary_device = None
         else:
-            # If a specific device was requested and differs from the parameter device, attempt to move
-            if opponent_device and torch.cuda.is_available():
-                desired = torch.device(opponent_device)
-                if self.primary_device != desired:
+            self.opponent = setup_model(cfg)
+            try:
+                params = self.opponent.parameters()
+                first_param = next(params)
+                self.primary_device = first_param.device
+            except (StopIteration, AttributeError):
+                device_target = opponent_device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+                self.primary_device = torch.device(device_target)
+                if hasattr(self.opponent, "to") and device_target is not None:
                     try:
-                        self.opponent = self.opponent.to(desired)
-                        self.primary_device = desired
+                        self.opponent = self.opponent.to(device_target)
                     except Exception:
-                        # Fall back to the existing device map (common for 4bit models).
                         pass
-        self.opponent.eval()
+            else:
+                if opponent_device and torch.cuda.is_available():
+                    desired = torch.device(opponent_device)
+                    if self.primary_device != desired:
+                        try:
+                            self.opponent = self.opponent.to(desired)
+                            self.primary_device = desired
+                        except Exception:
+                            pass
+            if self.opponent is not None:
+                self.opponent.eval()
         self.call_counter = 0
 
     def update_opponent(self, policy_model) -> None:
         """Copy LoRA weights from the current policy to the opponent."""
+
+        if self.remote_provider is not None:
+            return
 
         from peft import get_peft_model_state_dict, set_peft_model_state_dict
 
@@ -59,14 +99,31 @@ class SelfPlayManager:
     def generate_opponent(self, prompts: List[str], max_tokens: int) -> List[str]:
         """Generate outputs from the opponent for each prompt."""
 
+        if self.remote_provider is not None:
+            if self.log_intersteps:
+                print(f"[Stage] Remote opponent request start | prompts={len(prompts)}")
+            completions = asyncio.run(self.remote_provider.agenerate(prompts, max_tokens))
+            if self.log_intersteps:
+                print(f"[Stage] Remote opponent request done")
+            return list(completions)
+
         outs: List[str] = []
         for pr in prompts:
             if self.log_intersteps:
                 print(f"[Stage] Opponent generation start (prompt preview): {pr[:80].replace('\n', ' ')}")
             with torch.no_grad():
                 inputs = self.op_tok(pr, return_tensors="pt")
-                embed_device = self.opponent.model.embed_tokens.weight.device
-                inputs = {key: value.to(embed_device) for key, value in inputs.items()}
+                model_for_embeddings = getattr(self.opponent, "model", self.opponent)
+                if hasattr(model_for_embeddings, "embed_tokens"):
+                    embed_device = model_for_embeddings.embed_tokens.weight.device
+                else:
+                    embed_device = self.primary_device or torch.device(
+                        self.opponent_device if torch.cuda.is_available() else "cpu"
+                    )
+                inputs = {
+                    key: value.to(embed_device) if hasattr(value, "to") else value
+                    for key, value in inputs.items()
+                }
                 out = self.opponent.generate(
                     **inputs,
                     max_new_tokens=max_tokens,

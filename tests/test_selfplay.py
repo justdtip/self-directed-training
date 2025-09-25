@@ -1,6 +1,6 @@
 import pytest
 
-from azr.config import AzrModelCfg
+from azr.config import AzrModelCfg, AzrSelfPlayCfg
 from azr.selfplay_manager import SelfPlayManager
 
 
@@ -42,18 +42,20 @@ class DummyModel:
 @pytest.fixture
 def manager(monkeypatch):
     cfg = AzrModelCfg(model_id="stub", lora_r=4, lora_alpha=8, quantization="4bit")
+    sp_cfg = AzrSelfPlayCfg(enabled=True, device="cpu")
     monkeypatch.setattr("azr.selfplay_manager.load_tokenizer", lambda model_id: DummyTokenizer())
     monkeypatch.setattr("azr.selfplay_manager.setup_model", lambda cfg, **kwargs: DummyModel())
-    return SelfPlayManager(cfg, opponent_device="cpu")
+    return SelfPlayManager(cfg, sp_cfg, opponent_device="cpu")
 
 
 def test_generate_opponent_uses_stub(monkeypatch):
     cfg = AzrModelCfg(model_id="stub", lora_r=4, lora_alpha=8, quantization="4bit")
+    sp_cfg = AzrSelfPlayCfg(enabled=True, device="cpu")
     tokenizer = DummyTokenizer()
     model = DummyModel()
     monkeypatch.setattr("azr.selfplay_manager.load_tokenizer", lambda model_id: tokenizer)
     monkeypatch.setattr("azr.selfplay_manager.setup_model", lambda cfg, **kwargs: model)
-    mgr = SelfPlayManager(cfg, opponent_device="cpu")
+    mgr = SelfPlayManager(cfg, sp_cfg, opponent_device="cpu")
 
     outputs = mgr.generate_opponent(["prompt"], max_tokens=5)
     assert outputs == ["prompt::opponent"]

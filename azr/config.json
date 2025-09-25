@@ -26,8 +26,18 @@
   "self_play": {
     "enabled": true,
     "weight": 0.2,
-    "device": "cuda:1",
-    "update_every": 500
+    "device": "cuda:0",
+    "update_every": 1000,
+    "opponent": {
+      "source": "remote",
+      "provider": "together_ai",
+      "model_id": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+      "endpoint": "https://api.together.ai/v1/chat/completions",
+      "api_key_env": "TOGETHER_API_KEY",
+      "max_concurrency": 2,
+      "temperature": 0.7,
+      "top_p": 0.95
+    }
   },
   "data": {
     "train_path": "azr/data/train.jsonl"

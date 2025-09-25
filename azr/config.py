@@ -67,6 +67,9 @@ class AzrSelfPlayCfg:
     weight: float = 0.20
     device: str = "cuda:1"
     update_every: int = 500
+    # Optional remote opponent configuration. Expected keys include:
+    #   source, provider, model_id, endpoint, api_key_env, max_concurrency, temperature, top_p.
+    opponent: Dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AzrSelfPlayCfg":
@@ -75,6 +78,7 @@ class AzrSelfPlayCfg:
             weight=float(data.get("weight", 0.20)),
             device=str(data.get("device", "cuda:1")),
             update_every=int(data.get("update_every", 500)),
+            opponent=data.get("opponent"),
         )
 
 

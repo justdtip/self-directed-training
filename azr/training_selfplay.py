@@ -111,12 +111,13 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     max_prompt_len = int(rlhf_cfg["max_prompt_length"])
     max_completion_len = int(rlhf_cfg["max_completion_length"])
 
-    sp_manager: SelfPlayManager | None = None
     log_intersteps = bool(cfg_map.get("log_intersteps"))
 
+    sp_manager: SelfPlayManager | None = None
     if sp_cfg.enabled:
         sp_manager = SelfPlayManager(
             model_cfg,
+            sp_cfg,
             opponent_device=sp_cfg.device,
             log_intersteps=log_intersteps,
         )
@@ -188,7 +189,8 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         trainer_state=None,
         **_: Any,
     ) -> List[float]:
-        del completion_ids, trainer_state  # not used in reward computation yet
+        del completion_ids
+        state = trainer_state
         metadata = metadata or [{} for _ in completions]
 
         base_scores: List[float] = []
@@ -205,7 +207,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             base_scores.append(score)
         # --- BEGIN interstep logging ---
         if cfg_map.get("log_intersteps"):
-            step = getattr(trainer_state, "global_step", None)
+            step = getattr(state, "global_step", None)
             print(f"[Interstep] global_step={step}")
             if prompts:
                 prompt_preview = prompts[0][:120].replace("\n", " ")
@@ -215,7 +217,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 print(f"[Score] {base_scores[0] if base_scores else None}")
         # --- END interstep logging ---
         if log_intersteps:
-            step = getattr(trainer_state, "global_step", None)
+            step = getattr(state, "global_step", None)
             print(f"[Stage] reward_fn start | step={step} prompts={len(prompts)}")
 
         if sp_cfg.enabled and sp_manager is not None:
@@ -268,8 +270,16 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 return control
 
             def on_step_end(self, args, state, control, **kwargs):  # type: ignore[override]
-                last = state.log_history[-1] if state.log_history else {}
-                print(f"[Stage] on_step_end   | step={state.global_step} metrics={last}")
+                last = state.log_history[-1] if state.log_history else None
+                if last:
+                    print(f"[Stage] on_step_end   | step={state.global_step} metrics={last}")
+                else:
+                    print(f"[Stage] on_step_end   | step={state.global_step} metrics=<pending>")
+                return control
+
+            def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[override]
+                if logs:
+                    print(f"[Stage] on_log        | step={state.global_step} logs={logs}")
                 return control
 
         trainer.add_callback(_StageLoggerCallback())
