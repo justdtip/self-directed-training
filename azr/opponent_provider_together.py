@@ -27,16 +27,16 @@ class TogetherAIOpponentProvider:
         self.api_key = api_key
         self.temperature = temperature
         self.top_p = top_p
-        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._max_concurrency = max_concurrency
         self._client_timeout = aiohttp.ClientTimeout(total=request_timeout) if request_timeout else None
-        self._session: aiohttp.ClientSession | None = None
 
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._session is None:
-            self._session = aiohttp.ClientSession(timeout=self._client_timeout)
-        return self._session
-
-    async def _generate_one(self, prompt: str, max_new_tokens: int) -> str:
+    async def _generate_one(
+        self,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        prompt: str,
+        max_new_tokens: int,
+    ) -> str:
         payload = {
             "model": self.model_id,
             "messages": [{"role": "user", "content": prompt}],
@@ -48,8 +48,7 @@ class TogetherAIOpponentProvider:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        session = await self._ensure_session()
-        async with self._semaphore:
+        async with semaphore:
             async with session.post(self.endpoint, headers=headers, json=payload) as resp:
                 if resp.status != 200:
                     text = await resp.text()
@@ -65,13 +64,17 @@ class TogetherAIOpponentProvider:
                 return content
 
     async def agenerate(self, prompts: Iterable[str], max_new_tokens: int) -> List[str]:
-        tasks = [self._generate_one(prompt, max_new_tokens) for prompt in prompts]
-        return await asyncio.gather(*tasks)
+        prompts = list(prompts)
+        semaphore = asyncio.Semaphore(self._max_concurrency)
+        async with aiohttp.ClientSession(timeout=self._client_timeout) as session:
+            tasks = [
+                self._generate_one(session, semaphore, prompt, max_new_tokens)
+                for prompt in prompts
+            ]
+            return await asyncio.gather(*tasks)
 
-    async def close(self) -> None:
-        if self._session is not None:
-            await self._session.close()
-            self._session = None
+    async def close(self) -> None:  # pragma: no cover - maintained for compatibility
+        return None
 
 
 __all__ = ["TogetherAIOpponentProvider"]

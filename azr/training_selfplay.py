@@ -17,6 +17,7 @@ from .data import load_dataset as load_data
 from .modeling import load_tokenizer, setup_model
 from .rewards import blended_reward
 from .selfplay_manager import SelfPlayManager
+from .callbacks import TrainingMetricsCallback
 
 _DEFAULT_DATA_PATH = "/opt/azr/data/train.jsonl"
 
@@ -128,7 +129,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         per_device_train_batch_size=per_device_train_bs,
         gradient_accumulation_steps=int(rlhf_cfg["gradient_accumulation_steps"]),
         learning_rate=train_cfg.lr,
-        logging_steps=5,
+        logging_steps=1,
         warmup_ratio=train_cfg.warmup_ratio,
         weight_decay=train_cfg.weight_decay,
         bf16=bf16_flag,
@@ -262,7 +263,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     else:
         trainer_kwargs["processing_class"] = tokenizer
     trainer = GRPOTrainer(**trainer_kwargs)
-
+    trainer.add_callback(TrainingMetricsCallback(out_dir=getattr(grpo_cfg, "output_dir", None)))
     if log_intersteps:
         class _StageLoggerCallback(TrainerCallback):
             def on_step_begin(self, args, state, control, **kwargs):  # type: ignore[override]

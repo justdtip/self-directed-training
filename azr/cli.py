@@ -3,6 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import os
+
+# Silence harmless tokenizer fork warnings that clutter logs.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 import click
 
 from .config import AzrSelfPlayCfg, load_config
