@@ -43,7 +43,7 @@ def train(config_path: str, dataset: Optional[str], output: str, max_steps: Opti
     if self_play_cfg.enabled:
         console.print("[cyan]Launching self-play trainer...[/]")
         sp_config = _prepare_selfplay_config(cfg, dataset)
-        trainer = build_selfplay_trainer(sp_config)
+        trainer = build_selfplay_trainer(sp_config, max_steps=max_steps)
         trainer.train()
         return
 

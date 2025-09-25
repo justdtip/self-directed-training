@@ -27,7 +27,22 @@ class SelfPlayManager:
         self.cfg = cfg
         self.opponent_device = opponent_device
         self.op_tok = load_tokenizer(cfg.model_id)
-        self.opponent = setup_model(cfg).to(self.opponent_device)
+        self.opponent = setup_model(cfg)
+        try:
+            self.primary_device = next(self.opponent.parameters()).device
+        except StopIteration:
+            self.primary_device = torch.device(opponent_device if torch.cuda.is_available() else "cpu")
+        else:
+            # If a specific device was requested and differs from the parameter device, attempt to move
+            if opponent_device and torch.cuda.is_available():
+                desired = torch.device(opponent_device)
+                if self.primary_device != desired:
+                    try:
+                        self.opponent = self.opponent.to(desired)
+                        self.primary_device = desired
+                    except Exception:
+                        # Fall back to the existing device map (common for 4bit models).
+                        pass
         self.opponent.eval()
         self.call_counter = 0
 
@@ -46,7 +61,8 @@ class SelfPlayManager:
         outs: List[str] = []
         for pr in prompts:
             with torch.no_grad():
-                inputs = self.op_tok(pr, return_tensors="pt").to(self.opponent_device)
+                inputs = self.op_tok(pr, return_tensors="pt")
+                inputs = {key: value.to(self.primary_device) for key, value in inputs.items()}
                 out = self.opponent.generate(
                     **inputs,
                     max_new_tokens=max_tokens,

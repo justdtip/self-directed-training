@@ -76,7 +76,7 @@ def _merge_rlhf(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return defaults
 
 
-def build_trainer(config: Any) -> GRPOTrainer:
+def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     """Build and return a GRPOTrainer using self-play and code-execution rewards."""
 
     cfg_map = _ensure_mapping(config)
@@ -132,6 +132,8 @@ def build_trainer(config: Any) -> GRPOTrainer:
         temperature=float(rlhf_cfg["temperature"]),
         top_p=float(rlhf_cfg["top_p"]),
     )
+    if max_steps is not None:
+        grpo_kwargs["max_steps"] = max(1, int(max_steps))
     clip_value = float(rlhf_cfg["clip_range_ratio"])
     if _GRPO_SUPPORTS_CLIP_RANGE:
         grpo_kwargs["clip_range_ratio"] = clip_value
@@ -171,9 +173,20 @@ def build_trainer(config: Any) -> GRPOTrainer:
 
     train_dataset = PromptDataset(samples)
 
-    def reward_fn(batch_prompts: List[str], policy_outputs: List[str], metadata: List[Dict[str, Any]]) -> List[float]:
+    def reward_fn(
+        *,
+        prompts: List[str],
+        completions: List[str],
+        completion_ids: List[List[int]],  # unused but required by TRL
+        metadata: List[Dict[str, Any]] | None = None,
+        trainer_state=None,
+        **_: Any,
+    ) -> List[float]:
+        del completion_ids, trainer_state  # not used in reward computation yet
+        metadata = metadata or [{} for _ in completions]
+
         base_scores: List[float] = []
-        for output, meta in zip(policy_outputs, metadata):
+        for output, meta in zip(completions, metadata):
             score, _ = blended_reward(
                 output,
                 meta.get("tests", []),
@@ -186,11 +199,12 @@ def build_trainer(config: Any) -> GRPOTrainer:
             base_scores.append(score)
 
         if sp_cfg.enabled and sp_manager is not None:
-            opponent_outputs = sp_manager.generate_opponent(batch_prompts, max_completion_len)
+            opponent_outputs = sp_manager.generate_opponent(prompts, max_completion_len)
+            tests_per_example = [meta.get("tests", []) for meta in metadata]
             sp_scores = sp_manager.compute_scores(
-                policy_outputs,
+                completions,
                 opponent_outputs,
-                [meta.get("tests", []) for meta in metadata],
+                tests_per_example,
             )
             weight = float(sp_cfg.weight)
             combined = [(1.0 - weight) * base + weight * sp for base, sp in zip(base_scores, sp_scores)]
@@ -219,9 +233,9 @@ def build_trainer(config: Any) -> GRPOTrainer:
     return trainer
 
 
-def main(config_path: str) -> None:
+def main(config_path: str, *, max_steps: int | None = None) -> None:
     config = load_config(config_path)
-    trainer = build_trainer(config)
+    trainer = build_trainer(config, max_steps=max_steps)
     trainer.train()
 
 
