@@ -48,7 +48,7 @@ def setup_model(
         quantization_config=bnb_config,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16 if bf16 else None,
-        device_map="auto" if bnb_config is not None else None,
+        device_map=cfg.device_map if cfg.device_map is not None else ("auto" if bnb_config is not None else None),
     )
 
     if bnb_config is not None:

@@ -112,8 +112,14 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     max_completion_len = int(rlhf_cfg["max_completion_length"])
 
     sp_manager: SelfPlayManager | None = None
+    log_intersteps = bool(cfg_map.get("log_intersteps"))
+
     if sp_cfg.enabled:
-        sp_manager = SelfPlayManager(model_cfg, opponent_device=sp_cfg.device)
+        sp_manager = SelfPlayManager(
+            model_cfg,
+            opponent_device=sp_cfg.device,
+            log_intersteps=log_intersteps,
+        )
 
     per_device_train_bs = max(1, int(rlhf_cfg["num_generations"]))
 
@@ -197,6 +203,20 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 },
             )
             base_scores.append(score)
+        # --- BEGIN interstep logging ---
+        if cfg_map.get("log_intersteps"):
+            step = getattr(trainer_state, "global_step", None)
+            print(f"[Interstep] global_step={step}")
+            if prompts:
+                prompt_preview = prompts[0][:120].replace("\n", " ")
+                completion_preview = completions[0][:200].replace("\n", " ")
+                print(f"[Prompt] {prompt_preview}")
+                print(f"[Completion] {completion_preview}")
+                print(f"[Score] {base_scores[0] if base_scores else None}")
+        # --- END interstep logging ---
+        if log_intersteps:
+            step = getattr(trainer_state, "global_step", None)
+            print(f"[Stage] reward_fn start | step={step} prompts={len(prompts)}")
 
         if sp_cfg.enabled and sp_manager is not None:
             opponent_outputs = sp_manager.generate_opponent(prompts, max_completion_len)
@@ -213,8 +233,19 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 sp_manager.call_counter += 1
                 if sp_manager.call_counter % sp_cfg.update_every == 0:
                     sp_manager.update_opponent(model)
+            if log_intersteps:
+                base_preview = base_scores[0] if base_scores else float("nan")
+                sp_preview = sp_scores[0] if sp_scores else float("nan")
+                combined_preview = combined[0] if combined else float("nan")
+                print(
+                    "[Stage] reward_fn blend | "
+                    f"base={base_preview:.4f} sp={sp_preview:.4f} combined={combined_preview:.4f} "
+                    f"weight={weight}"
+                )
             return combined
 
+        if log_intersteps and base_scores:
+            print(f"[Stage] reward_fn return base score={base_scores[0]:.4f}")
         return base_scores
 
     # Pass the tokenizer through whichever argument this TRL version supports.
@@ -229,6 +260,30 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     else:
         trainer_kwargs["processing_class"] = tokenizer
     trainer = GRPOTrainer(**trainer_kwargs)
+
+    if log_intersteps:
+        class _StageLoggerCallback(TrainerCallback):
+            def on_step_begin(self, args, state, control, **kwargs):  # type: ignore[override]
+                print(f"[Stage] on_step_begin | step={state.global_step} epoch={state.epoch}")
+                return control
+
+            def on_step_end(self, args, state, control, **kwargs):  # type: ignore[override]
+                last = state.log_history[-1] if state.log_history else {}
+                print(f"[Stage] on_step_end   | step={state.global_step} metrics={last}")
+                return control
+
+        trainer.add_callback(_StageLoggerCallback())
+
+        original_generate = trainer.model.generate
+
+        def _logged_generate(*gen_args, **gen_kwargs):
+            step = getattr(trainer.state, 'global_step', None)
+            print(f"[Stage] Policy generate start | step={step}")
+            output = original_generate(*gen_args, **gen_kwargs)
+            print(f"[Stage] Policy generate done  | step={step}")
+            return output
+
+        trainer.model.generate = _logged_generate  # type: ignore[assignment]
     trainer.add_callback(_EnsureLmHeadDtype())
     return trainer
 

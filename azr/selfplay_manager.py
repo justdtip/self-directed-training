@@ -23,9 +23,10 @@ class SelfPlayManager:
     Frozen opponent on a specified device. Generates outputs and computes win/loss scores.
     """
 
-    def __init__(self, cfg: AzrModelCfg, opponent_device: str = "cuda:1") -> None:
+    def __init__(self, cfg: AzrModelCfg, opponent_device: str = "cuda:1", *, log_intersteps: bool = False) -> None:
         self.cfg = cfg
         self.opponent_device = opponent_device
+        self.log_intersteps = log_intersteps
         self.op_tok = load_tokenizer(cfg.model_id)
         self.opponent = setup_model(cfg)
         try:
@@ -60,9 +61,12 @@ class SelfPlayManager:
 
         outs: List[str] = []
         for pr in prompts:
+            if self.log_intersteps:
+                print(f"[Stage] Opponent generation start (prompt preview): {pr[:80].replace('\n', ' ')}")
             with torch.no_grad():
                 inputs = self.op_tok(pr, return_tensors="pt")
-                inputs = {key: value.to(self.primary_device) for key, value in inputs.items()}
+                embed_device = self.opponent.model.embed_tokens.weight.device
+                inputs = {key: value.to(embed_device) for key, value in inputs.items()}
                 out = self.opponent.generate(
                     **inputs,
                     max_new_tokens=max_tokens,
@@ -70,7 +74,10 @@ class SelfPlayManager:
                     temperature=0.7,
                     top_p=0.95,
                 )
-                outs.append(self.op_tok.decode(out[0], skip_special_tokens=True))
+                decoded = self.op_tok.decode(out[0], skip_special_tokens=True)
+                outs.append(decoded)
+                if self.log_intersteps:
+                    print(f"[Stage] Opponent completion done | len={len(decoded)}")
         return outs
 
     def compute_scores(

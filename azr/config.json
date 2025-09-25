@@ -3,7 +3,8 @@
     "model_id": "deepcogito/cogito-v1-preview-llama-8b",
     "lora_r": 16,
     "lora_alpha": 32,
-    "quantization": "4bit"
+    "quantization": "4bit",
+    "device_map": "auto"
   },
   "rlhf": {
     "num_generations": 4,
@@ -30,5 +31,6 @@
   },
   "data": {
     "train_path": "azr/data/train.jsonl"
-  }
+  },
+  "log_intersteps": true
 }

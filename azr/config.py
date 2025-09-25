@@ -46,6 +46,7 @@ class AzrModelCfg:
     lora_r: int
     lora_alpha: int
     quantization: str
+    device_map: object | None = "auto"
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AzrModelCfg":
@@ -56,6 +57,7 @@ class AzrModelCfg:
             lora_r=int(data.get("lora_r", 16)),
             lora_alpha=int(data.get("lora_alpha", 32)),
             quantization=quant_str,
+            device_map=data.get("device_map", "auto"),
         )
 
 
