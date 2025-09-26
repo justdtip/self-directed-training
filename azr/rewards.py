@@ -78,6 +78,16 @@ def blended_reward(
     if extra and "stderr" in extra:
         bonus += timeout_penalty(extra["stderr"])
 
+    # Conciseness bonus: reward shorter, correct solutions.
+    if base == 1.0:
+        tokens = model_output.strip().split()
+        token_count = len(tokens)
+        if token_count <= 200:
+            bonus += 0.2
+        elif token_count < 500:
+            # Linearly decay the bonus from 0.2 at 200 tokens down to 0 at 500 tokens.
+            bonus += 0.2 * max(0.0, (500 - token_count) / 300.0)
+
     score = max(0.0, min(1.0, base + bonus))
     stats.update({"base": base, "bonus": bonus})
     return score, stats
