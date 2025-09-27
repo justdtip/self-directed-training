@@ -1,0 +1,15 @@
+{
+  "policy_only": 11,
+  "opponent_only": 2,
+  "both": 1,
+  "neither": 82,
+  "total": 96,
+  "wins": 11,
+  "losses": 2,
+  "ties": 83,
+  "n_decisive": 13,
+  "win_rate": 0.8461538461538461,
+  "wilson_lb": 0.5776482949136899,
+  "wilson_ub": 0.9567427368172621,
+  "z": 1.96
+}
