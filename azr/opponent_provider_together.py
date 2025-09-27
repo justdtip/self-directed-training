@@ -43,6 +43,7 @@ class TogetherAIOpponentProvider:
             "max_tokens": max_new_tokens,
             "temperature": self.temperature,
             "top_p": self.top_p,
+            "stop": ["Final answer:", "{\"final_answer\":"]
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",

@@ -15,13 +15,14 @@
     "kl_coeff": 0.0,
     "bf16": false,
     "gradient_accumulation_steps": 8,
-    "temperature": 0.9,
+    "temperature": 0.92,
     "top_p": 0.9
   },
   "training": {
     "lr": 1e-05,
     "warmup_ratio": 0.03,
-    "weight_decay": 0.0
+    "weight_decay": 0.0,
+    "output_dir": "trainer_output"
   },
   "self_play": {
     "enabled": true,
@@ -41,6 +42,11 @@
   },
   "data": {
     "train_path": "azr/data/train.jsonl"
+  },
+  "logging": {
+    "log_executor_output": true,
+    "exec_store": "fail_first",
+    "exec_max_bytes": 4096
   },
   "log_intersteps": true
 }

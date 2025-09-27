@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
 from inspect import signature
@@ -7,17 +9,20 @@ from inspect import signature
 from transformers import set_seed
 from transformers.trainer_callback import TrainerCallback
 import torch
-from trl.trainer.grpo_trainer import GRPOConfig, GRPOTrainer
-
-_GRPO_SUPPORTS_CLIP_RANGE = "clip_range_ratio" in signature(GRPOConfig).parameters
-_GRPO_SUPPORTS_TOKENIZER_ARG = "tokenizer" in signature(GRPOTrainer.__init__).parameters
+from trl.trainer.grpo_trainer import GRPOConfig
 
 from .config import AzrModelCfg, AzrSelfPlayCfg, AzrTrainingCfg, load_config
 from .data import load_dataset as load_data
 from .modeling import load_tokenizer, setup_model
-from .rewards import blended_reward
+from .rewards import blended_reward, score_code_tests
 from .selfplay_manager import SelfPlayManager
+from .trainer_overrides import GRPOTrainerWithStop
 from .callbacks import TrainingMetricsCallback
+from .generation_logger import GenerationLogger
+from .scoreboard import ScoreBoard
+
+_GRPO_SUPPORTS_CLIP_RANGE = "clip_range_ratio" in signature(GRPOConfig).parameters
+_GRPO_SUPPORTS_TOKENIZER_ARG = "tokenizer" in signature(GRPOTrainerWithStop.__init__).parameters
 
 _DEFAULT_DATA_PATH = "/opt/azr/data/train.jsonl"
 
@@ -113,6 +118,12 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     max_completion_len = int(rlhf_cfg["max_completion_length"])
 
     log_intersteps = bool(cfg_map.get("log_intersteps"))
+    logging_cfg = cfg_map.get("logging", {}) or {}
+    log_executor_output = bool(logging_cfg.get("log_executor_output", False))
+    exec_store = str(logging_cfg.get("exec_store", "fail_first"))
+    exec_max_bytes_val = logging_cfg.get("exec_max_bytes")
+    exec_max_bytes = int(exec_max_bytes_val) if exec_max_bytes_val is not None else None
+    exec_truncate_bytes = exec_max_bytes if exec_max_bytes is not None else 4096
 
     sp_manager: SelfPlayManager | None = None
     if sp_cfg.enabled:
@@ -125,7 +136,12 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
 
     per_device_train_bs = max(1, int(rlhf_cfg["num_generations"]))
 
+    output_dir = train_cfg.output_dir or cfg_map.get("output_dir") or cfg_map.get("training_output_dir") or "trainer_output"
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
     grpo_kwargs = dict(
+        output_dir=output_dir,
         per_device_train_batch_size=per_device_train_bs,
         gradient_accumulation_steps=int(rlhf_cfg["gradient_accumulation_steps"]),
         learning_rate=train_cfg.lr,
@@ -149,29 +165,46 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         grpo_kwargs["epsilon"] = clip_value
     grpo_cfg = GRPOConfig(**grpo_kwargs)
 
+    gen_logger: Optional[GenerationLogger] = GenerationLogger(
+        out_dir=str(output_path / "generations"),
+        gzip_output=False,
+        rotate_mb=128,
+        flush_every=200,
+        redact_prompt=False,
+        max_bytes=exec_max_bytes,
+    )
+    scoreboard = ScoreBoard(out_dir=output_dir)
+
+    trainer_ref: Optional[GRPOTrainerWithStop] = None
+
     class PromptDataset:
         def __init__(self, rows) -> None:
             self.rows = rows
+            # Pre-render chat prompts to avoid repeated template work each step.
+            sys_msg = {
+                "role": "system",
+                "content": (
+                    "You are a careful engineer. Provide a correct solution concisely. "
+                    "If coding helps, include a final Python code block implementing the solution, "
+                    "then terminate with a single line that begins with either "
+                    "'Final answer:' or '{\"final_answer\": \"...\"}' and stop immediately."
+                ),
+            }
+            self._rendered = []
+            for ex in self.rows:
+                rendered = tokenizer.apply_chat_template(
+                    [sys_msg, {"role": "user", "content": ex.prompt}],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                self._rendered.append(rendered)
 
         def __len__(self) -> int:
             return len(self.rows)
 
         def __getitem__(self, index: int) -> Dict[str, Any]:
             example = self.rows[index]
-            prompt = tokenizer.apply_chat_template(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a careful engineer. Provide a correct solution. If coding helps, "
-                            "include a final Python code block implementing the solution, then state 'Final answer: ...'."
-                        ),
-                    },
-                    {"role": "user", "content": example.prompt},
-                ],
-                tokenize=False,
-                add_generation_prompt=True,
-            )
+            prompt = self._rendered[index]
             meta = {
                 "tests": example.tests,
                 "timeout_s": example.timeout_s,
@@ -190,13 +223,16 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         trainer_state=None,
         **_: Any,
     ) -> List[float]:
+        nonlocal trainer_ref
         del completion_ids
         state = trainer_state
         metadata = metadata or [{} for _ in completions]
 
+        step_id = getattr(state, "global_step", None)
         base_scores: List[float] = []
-        for output, meta in zip(completions, metadata):
-            score, _ = blended_reward(
+        policy_pass_flags: List[bool] = []
+        for prompt_text, output, meta in zip(prompts, completions, metadata):
+            score, stats = blended_reward(
                 output,
                 meta.get("tests", []),
                 {
@@ -204,8 +240,29 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     "memory_mb": meta.get("memory_mb", 256),
                     "stderr": meta.get("stderr", ""),
                 },
+                collect_exec=log_executor_output,
+                exec_store=exec_store,
+                exec_max_bytes=exec_truncate_bytes,
             )
+            score = max(0.0, min(1.0, score))
             base_scores.append(score)
+            policy_pass = float(stats.get("base", 0.0)) >= 1.0
+            policy_pass_flags.append(policy_pass)
+            if gen_logger is not None:
+                payload = {
+                    "ts": time.time(),
+                    "source": "policy",
+                    "step": step_id,
+                    "prompt": prompt_text,
+                    "completion": output,
+                    "score": score,
+                    "passed": policy_pass,
+                    "length_tokens": len(output.strip().split()),
+                    "metadata": dict(meta),
+                }
+                if log_executor_output and "exec_traces" in stats:
+                    payload["exec_traces"] = stats["exec_traces"]
+                gen_logger.log(payload)
         # --- BEGIN interstep logging ---
         if cfg_map.get("log_intersteps"):
             step = getattr(state, "global_step", None)
@@ -222,7 +279,17 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             print(f"[Stage] reward_fn start | step={step} prompts={len(prompts)}")
 
         if sp_cfg.enabled and sp_manager is not None:
-            opponent_outputs = sp_manager.generate_opponent(prompts, max_completion_len)
+            try:
+                opponent_outputs = sp_manager.generate_opponent(prompts, max_completion_len)
+            except Exception as exc:
+                print(f"[Warning] Opponent provider failure: {exc}")
+                if trainer_ref is not None:
+                    try:
+                        trainer_ref.save_state()
+                        trainer_ref.save_model(trainer_ref.args.output_dir)
+                    except Exception:
+                        pass
+                return base_scores
             tests_per_example = [meta.get("tests", []) for meta in metadata]
             sp_scores = sp_manager.compute_scores(
                 completions,
@@ -231,6 +298,67 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             )
             weight = float(sp_cfg.weight)
             combined = [(1.0 - weight) * base + weight * sp for base, sp in zip(base_scores, sp_scores)]
+
+            opponent_pass_flags: List[bool] = []
+            opponent_trace_stats: List[Dict[str, object]] = []
+            for opp_out, meta in zip(opponent_outputs, metadata):
+                opp_base, opp_stats = score_code_tests(
+                    opp_out,
+                    meta.get("tests", []),
+                    timeout_s=meta.get("timeout_s", 2),
+                    memory_mb=meta.get("memory_mb", 256),
+                    collect_exec=log_executor_output,
+                    exec_store=exec_store,
+                    exec_max_bytes=exec_truncate_bytes,
+                )
+                opponent_pass_flags.append(opp_base >= 1.0)
+                opponent_trace_stats.append(opp_stats)
+
+            if gen_logger is not None:
+                ts = time.time()
+                for (
+                    prompt_text,
+                    opp_completion,
+                    meta,
+                    base_score,
+                    sp_score,
+                    combined_score,
+                    opp_pass,
+                    opp_stats,
+                ) in zip(
+                    prompts,
+                    opponent_outputs,
+                    metadata,
+                    base_scores,
+                    sp_scores,
+                    combined,
+                    opponent_pass_flags,
+                    opponent_trace_stats,
+                ):
+                    payload = {
+                        "ts": ts,
+                        "source": "opponent",
+                        "step": step_id,
+                        "prompt": prompt_text,
+                        "completion": opp_completion,
+                        "score": sp_score,
+                        "policy_score": base_score,
+                        "combined_score": combined_score,
+                        "weight": weight,
+                        "passed": opp_pass,
+                        "length_tokens": len(opp_completion.strip().split()),
+                        "metadata": dict(meta),
+                    }
+                    if log_executor_output and "exec_traces" in opp_stats:
+                        payload["exec_traces"] = opp_stats["exec_traces"]
+                    gen_logger.log(payload)
+
+            if scoreboard is not None and policy_pass_flags:
+                try:
+                    scoreboard.update_batch(policy_pass_flags, opponent_pass_flags)
+                    scoreboard.write()
+                except Exception:
+                    pass
 
             if sp_cfg.update_every > 0:
                 sp_manager.call_counter += 1
@@ -249,6 +377,14 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
 
         if log_intersteps and base_scores:
             print(f"[Stage] reward_fn return base score={base_scores[0]:.4f}")
+        if scoreboard is not None and policy_pass_flags and not (sp_cfg.enabled and sp_manager is not None):
+            try:
+                opponent_flags = [False] * len(policy_pass_flags)
+                scoreboard.update_batch(policy_pass_flags, opponent_flags)
+                scoreboard.write()
+            except Exception:
+                pass
+
         return base_scores
 
     # Pass the tokenizer through whichever argument this TRL version supports.
@@ -262,7 +398,18 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         trainer_kwargs["tokenizer"] = tokenizer
     else:
         trainer_kwargs["processing_class"] = tokenizer
-    trainer = GRPOTrainer(**trainer_kwargs)
+    trainer = GRPOTrainerWithStop(**trainer_kwargs)
+    trainer.gen_logger = gen_logger
+    trainer.scoreboard = scoreboard
+    trainer.log_options = {
+        "log_executor_output": log_executor_output,
+        "exec_store": exec_store,
+        "exec_max_bytes": exec_max_bytes,
+    }
+    trainer_ref = trainer
+    if sp_manager is not None:
+        sp_manager.gen_logger = gen_logger
+        sp_manager.trainer = trainer
     trainer.add_callback(TrainingMetricsCallback(out_dir=getattr(grpo_cfg, "output_dir", None)))
     if log_intersteps:
         class _StageLoggerCallback(TrainerCallback):
@@ -302,7 +449,14 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
 def main(config_path: str, *, max_steps: int | None = None) -> None:
     config = load_config(config_path)
     trainer = build_trainer(config, max_steps=max_steps)
-    trainer.train()
+    try:
+        trainer.train()
+    finally:
+        if hasattr(trainer, "gen_logger"):
+            try:
+                trainer.gen_logger.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":  # pragma: no cover

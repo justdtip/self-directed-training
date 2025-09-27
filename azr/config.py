@@ -87,6 +87,7 @@ class AzrTrainingCfg:
     lr: float = 1e-5
     warmup_ratio: float = 0.03
     weight_decay: float = 0.0
+    output_dir: str | None = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AzrTrainingCfg":
@@ -94,6 +95,7 @@ class AzrTrainingCfg:
             lr=float(data.get("lr", 1e-5)),
             warmup_ratio=float(data.get("warmup_ratio", 0.03)),
             weight_decay=float(data.get("weight_decay", 0.0)),
+            output_dir=data.get("output_dir"),
         )
 
 
@@ -113,10 +115,46 @@ def save_config(cfg: Dict[str, Any], path: str) -> None:
         yaml.safe_dump(cfg, handle, sort_keys=True)
 
 
+@dataclass
+class AzrVllmCfg:
+    enabled: bool = False
+    manage_server: bool = False
+    host: str = "127.0.0.1"
+    port: int = 8000
+    tensor_parallel_size: int = 1
+    gpu_memory_utilization: float = 0.65
+    dtype: str = "auto"
+    enforce_eager: bool = False
+    max_model_len: int | None = None
+    trust_remote_code: bool = True
+    visible_devices: str | None = None
+    server_timeout: float = 240.0
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AzrVllmCfg":
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            manage_server=bool(data.get("manage_server", False)),
+            host=str(data.get("host", "127.0.0.1")),
+            port=int(data.get("port", 8000)),
+            tensor_parallel_size=max(1, int(data.get("tensor_parallel_size", 1))),
+            gpu_memory_utilization=float(data.get("gpu_memory_utilization", 0.65)),
+            dtype=str(data.get("dtype", "auto")),
+            enforce_eager=bool(data.get("enforce_eager", False)),
+            max_model_len=int(data["max_model_len"]) if data.get("max_model_len") is not None else None,
+            trust_remote_code=bool(data.get("trust_remote_code", True)),
+            visible_devices=(str(data.get("visible_devices")) if data.get("visible_devices") else None),
+            server_timeout=float(data.get("server_timeout", 240.0)),
+        )
+
+
 __all__ = [
     "AzrModelCfg",
     "AzrSelfPlayCfg",
     "AzrTrainingCfg",
+    "AzrVllmCfg",
     "load_config",
     "save_config",
 ]

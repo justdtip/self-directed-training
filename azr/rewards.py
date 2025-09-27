@@ -21,6 +21,10 @@ def score_code_tests(
     tests: List[str],
     timeout_s: int = 2,
     memory_mb: int = 256,
+    *,
+    collect_exec: bool = False,
+    exec_store: str = "last",
+    exec_max_bytes: int = 4096,
 ) -> Tuple[float, Dict[str, int]]:
     """
     Execute extracted code against ``tests`` and compute the pass rate.
@@ -36,14 +40,43 @@ def score_code_tests(
     if code is None:
         return 0.0, {"passes": 0, "total": total}
 
+    def _truncate(text: str | None) -> str:
+        if text is None:
+            return ""
+        if exec_max_bytes is None:
+            return text
+        data = text.encode("utf-8")
+        if len(data) <= exec_max_bytes:
+            return text
+        return data[:exec_max_bytes].decode("utf-8", errors="ignore")
+
+    traces: List[Dict[str, object]] | None = [] if collect_exec else None
     passes = 0
-    for test in tests:
+    for idx, test in enumerate(tests):
         snippet = f"{code}\n\n{test}"
         result = run_code(snippet, timeout_s=timeout_s, memory_mb=memory_mb)
         ok = result.returncode == 0 and "AssertionError" not in (result.stderr or "")
         passes += int(ok)
 
-    return passes / total, {"passes": passes, "total": total}
+        if collect_exec and traces is not None:
+            record = {
+                "test_index": idx,
+                "returncode": result.returncode,
+                "stdout": _truncate(result.stdout),
+                "stderr": _truncate(result.stderr),
+            }
+            traces.append(record)
+            if exec_store == "fail_first" and not ok:
+                traces = [record]
+                break
+
+    stats: Dict[str, object] = {"passes": passes, "total": total}
+    if collect_exec and traces is not None:
+        if exec_store == "last" and traces:
+            traces = [traces[-1]]
+        stats["exec_traces"] = traces
+
+    return passes / total if total else 0.0, stats  # total>0 ensured above
 
 
 def style_penalty(model_output: str) -> float:
@@ -67,12 +100,24 @@ def blended_reward(
     model_output: str,
     tests: List[str],
     extra: Dict | None = None,
+    *,
+    collect_exec: bool = False,
+    exec_store: str = "last",
+    exec_max_bytes: int = 4096,
 ) -> Tuple[float, Dict[str, float]]:
     """Combine code pass rate with minor style/timeout bonuses."""
 
     timeout_s = extra.get("timeout_s", 2) if extra else 2
     memory_mb = extra.get("memory_mb", 256) if extra else 256
-    base, stats = score_code_tests(model_output, tests, timeout_s=timeout_s, memory_mb=memory_mb)
+    base, stats = score_code_tests(
+        model_output,
+        tests,
+        timeout_s=timeout_s,
+        memory_mb=memory_mb,
+        collect_exec=collect_exec,
+        exec_store=exec_store,
+        exec_max_bytes=exec_max_bytes,
+    )
 
     bonus = style_penalty(model_output)
     if extra and "stderr" in extra:

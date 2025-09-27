@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 import asyncio
+import time
 import torch
 
 from .tools.python_tool import run_code
@@ -40,6 +41,8 @@ class SelfPlayManager:
 
         opp_info = (sp_cfg.opponent if sp_cfg and sp_cfg.opponent else {})
         self.remote_provider: Optional[TogetherAIOpponentProvider] = None
+        self.gen_logger = None
+        self.trainer = None
 
         self.op_tok = load_tokenizer(cfg.model_id)
 
@@ -105,6 +108,25 @@ class SelfPlayManager:
             completions = asyncio.run(self.remote_provider.agenerate(prompts, max_tokens))
             if self.log_intersteps:
                 print(f"[Stage] Remote opponent request done")
+            if self.gen_logger is not None:
+                ts = time.time()
+                step = None
+                if getattr(self, "trainer", None) is not None:
+                    step = getattr(getattr(self.trainer, "state", None), "global_step", None)
+                for prompt_text, completion in zip(prompts, completions):
+                    try:
+                        self.gen_logger.log(
+                            {
+                                "ts": ts,
+                                "source": "opponent_raw",
+                                "step": step,
+                                "prompt": prompt_text,
+                                "completion": completion,
+                                "length_tokens": len(completion.split()),
+                            }
+                        )
+                    except Exception:
+                        pass
             return list(completions)
 
         outs: List[str] = []
@@ -152,6 +174,7 @@ class SelfPlayManager:
         for p_out, o_out, tlist in zip(policy_outs, opp_outs, tests):
             p_pass, _ = score_code_tests(p_out, tlist)
             o_pass, _ = score_code_tests(o_out, tlist)
+
             if p_pass > o_pass:
                 scores.append(1.0)
             elif p_pass < o_pass:
