@@ -70,6 +70,11 @@ def _close_generation_logger(trainer) -> None:
             trainer.gen_logger.close()
         except Exception:
             pass
+    if hasattr(trainer, "failure_logger"):
+        try:
+            trainer.failure_logger.close()
+        except Exception:
+            pass
 
 
 @click.group()

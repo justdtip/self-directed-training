@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 import asyncio
 import time
@@ -22,9 +22,7 @@ class SelfPlayResult:
 
 
 class SelfPlayManager:
-    """
-    Frozen opponent on a specified device. Generates outputs and computes win/loss scores.
-    """
+    """Manages remote/local opponents and optional teacher assistance."""
 
     def __init__(
         self,
@@ -33,14 +31,20 @@ class SelfPlayManager:
         opponent_device: str = "cuda:1",
         *,
         log_intersteps: bool = False,
+        config_map: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.cfg = cfg
         self.sp_cfg = sp_cfg
         self.opponent_device = opponent_device
         self.log_intersteps = log_intersteps
+        self.config_map = config_map or {}
 
-        opp_info = (sp_cfg.opponent if sp_cfg and sp_cfg.opponent else {})
+        thinking_cfg = self.config_map.get("thinking", {}) or {}
+        teacher_cfg = self.config_map.get("teacher", {}) or {}
+
+        opp_info = sp_cfg.opponent if sp_cfg and sp_cfg.opponent else {}
         self.remote_provider: Optional[TogetherAIOpponentProvider] = None
+        self.teacher_provider: Optional[TogetherAIOpponentProvider] = None
         self.gen_logger = None
         self.trainer = None
 
@@ -54,14 +58,20 @@ class SelfPlayManager:
                 endpoint=opp_info["endpoint"],
                 model_id=opp_info["model_id"],
                 api_key_env=opp_info["api_key_env"],
-                max_concurrency=opp_info.get("max_concurrency", 5),
-                temperature=opp_info.get("temperature", 0.7),
-                top_p=opp_info.get("top_p", 0.95),
+                max_concurrency=int(opp_info.get("max_concurrency", 5)),
+                temperature=float(opp_info.get("temperature", 0.7)),
+                top_p=float(opp_info.get("top_p", 0.95)),
+                extra_body=opp_info.get("extra_body", {}),
+                thinking_budget=int(thinking_cfg.get("opponent_budget_tokens", 0)) or None,
+            )
+            print(
+                f"[SelfPlay] Loaded opponent provider {provider} model={opp_info['model_id']}"
             )
             self.opponent = None
             self.primary_device = None
         else:
             self.opponent = setup_model(cfg)
+            print("[SelfPlay] Loaded local frozen opponent model")
             try:
                 params = self.opponent.parameters()
                 first_param = next(params)
@@ -85,11 +95,28 @@ class SelfPlayManager:
                             pass
             if self.opponent is not None:
                 self.opponent.eval()
+
+        if teacher_cfg.get("source") == "remote":
+            provider = teacher_cfg.get("provider")
+            if provider != "together_ai":
+                raise ValueError(f"Unsupported teacher provider: {provider}")
+            self.teacher_provider = TogetherAIOpponentProvider(
+                endpoint=teacher_cfg["endpoint"],
+                model_id=teacher_cfg["model_id"],
+                api_key_env=teacher_cfg["api_key_env"],
+                max_concurrency=int(teacher_cfg.get("max_concurrency", 4)),
+                temperature=float(teacher_cfg.get("temperature", 0.6)),
+                top_p=float(teacher_cfg.get("top_p", 0.95)),
+                extra_body=teacher_cfg.get("extra_body", {}),
+                thinking_budget=int(thinking_cfg.get("teacher_budget_tokens", 0)) or None,
+            )
+            print(
+                f"[SelfPlay] Loaded teacher provider {provider} model={teacher_cfg['model_id']}"
+            )
+
         self.call_counter = 0
 
     def update_opponent(self, policy_model) -> None:
-        """Copy LoRA weights from the current policy to the opponent."""
-
         if self.remote_provider is not None:
             return
 
@@ -100,14 +127,15 @@ class SelfPlayManager:
         torch.cuda.synchronize()
 
     def generate_opponent(self, prompts: List[str], max_tokens: int) -> List[str]:
-        """Generate outputs from the opponent for each prompt."""
-
         if self.remote_provider is not None:
             if self.log_intersteps:
                 print(f"[Stage] Remote opponent request start | prompts={len(prompts)}")
             completions = asyncio.run(self.remote_provider.agenerate(prompts, max_tokens))
             if self.log_intersteps:
-                print(f"[Stage] Remote opponent request done")
+                print("[Stage] Remote opponent request done")
+            stats = self.remote_provider.pop_stats()
+            if stats:
+                print("[Remote]", " ".join(f"{k}={v}" for k, v in stats.items()))
             if self.gen_logger is not None:
                 ts = time.time()
                 step = None
@@ -159,17 +187,17 @@ class SelfPlayManager:
                     print(f"[Stage] Opponent completion done | len={len(decoded)}")
         return outs
 
+    def teacher_hint(self, prompts: List[str], max_tokens: int) -> List[str]:
+        if self.teacher_provider is None:
+            return ["" for _ in prompts]
+        return asyncio.run(self.teacher_provider.agenerate(prompts, max_tokens))
+
     def compute_scores(
         self,
         policy_outs: List[str],
         opp_outs: List[str],
         tests: List[List[str]],
     ) -> List[float]:
-        """
-        Compare each pair of outputs and return a score in [0, 1].
-        1.0 if policy wins, 0.0 if opponent wins, 0.5 for ties; fractional tie-breaker on code length.
-        """
-
         scores: List[float] = []
         for p_out, o_out, tlist in zip(policy_outs, opp_outs, tests):
             p_pass, _ = score_code_tests(p_out, tlist)

@@ -1,12 +1,15 @@
 ---
 base_model: deepcogito/cogito-v1-preview-llama-8b
-library_name: transformers
+library_name: peft
 model_name: trainer_output
 tags:
-- generated_from_trainer
-- trl
+- base_model:adapter:deepcogito/cogito-v1-preview-llama-8b
 - grpo
+- lora
+- transformers
+- trl
 licence: license
+pipeline_tag: text-generation
 ---
 
 # Model Card for trainer_output
@@ -34,6 +37,7 @@ This model was trained with GRPO, a method introduced in [DeepSeekMath: Pushing 
 
 ### Framework versions
 
+- PEFT 0.17.1
 - TRL: 0.23.0
 - Transformers: 4.56.2
 - Pytorch: 2.8.0

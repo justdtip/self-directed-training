@@ -6,12 +6,14 @@ from typing import Dict, List, Tuple
 from .tools.python_tool import run_code
 
 
-def extract_last_code_block(text: str) -> str | None:
-    """
-    Return the contents of the last fenced code block in ``text``.
-    Supports ```...``` or ```python ...``` fences.
-    """
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_CODE_BLOCK_RE = re.compile(r"```(?:python)?\s*(.*?)````", re.DOTALL | re.IGNORECASE)
 
+
+def extract_last_code_block(text: str) -> str | None:
+    """Return the last fenced code block, ignoring private thinking spans."""
+
+    text = _THINK_RE.sub("", text)
     blocks = re.findall(r"```(?:python)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
     return blocks[-1] if blocks else None
 
@@ -36,7 +38,8 @@ def score_code_tests(
         base = 0.1 if model_output and model_output.strip() else 0.0
         return base, {"passes": 0, "total": 0}
 
-    code = extract_last_code_block(model_output)
+    sanitized_output = _THINK_RE.sub("", model_output)
+    code = extract_last_code_block(sanitized_output)
     if code is None:
         return 0.0, {"passes": 0, "total": total}
 
@@ -119,13 +122,15 @@ def blended_reward(
         exec_max_bytes=exec_max_bytes,
     )
 
-    bonus = style_penalty(model_output)
+    sanitized_output = _THINK_RE.sub("", model_output)
+
+    bonus = style_penalty(sanitized_output)
     if extra and "stderr" in extra:
         bonus += timeout_penalty(extra["stderr"])
 
     # Conciseness bonus: reward shorter, correct solutions.
     if base == 1.0:
-        tokens = model_output.strip().split()
+        tokens = sanitized_output.strip().split()
         token_count = len(tokens)
         if token_count <= 200:
             bonus += 0.2

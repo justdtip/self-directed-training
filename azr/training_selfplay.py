@@ -9,6 +9,7 @@ from inspect import signature
 from transformers import set_seed
 from transformers.trainer_callback import TrainerCallback
 import torch
+import random
 from trl.trainer.grpo_trainer import GRPOConfig
 
 from .config import AzrModelCfg, AzrSelfPlayCfg, AzrTrainingCfg, load_config
@@ -19,6 +20,7 @@ from .selfplay_manager import SelfPlayManager
 from .trainer_overrides import GRPOTrainerWithStop
 from .callbacks import TrainingMetricsCallback
 from .generation_logger import GenerationLogger
+from .failure_logger import FailureLogger
 from .scoreboard import ScoreBoard
 
 _GRPO_SUPPORTS_CLIP_RANGE = "clip_range_ratio" in signature(GRPOConfig).parameters
@@ -132,6 +134,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             sp_cfg,
             opponent_device=sp_cfg.device,
             log_intersteps=log_intersteps,
+            config_map=cfg_map,
         )
 
     per_device_train_bs = max(1, int(rlhf_cfg["num_generations"]))
@@ -174,6 +177,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         max_bytes=exec_max_bytes,
     )
     scoreboard = ScoreBoard(out_dir=output_dir)
+    failure_logger = FailureLogger(out_dir=output_dir)
 
     trainer_ref: Optional[GRPOTrainerWithStop] = None
 
@@ -184,10 +188,13 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             sys_msg = {
                 "role": "system",
                 "content": (
-                    "You are a careful engineer. Provide a correct solution concisely. "
-                    "If coding helps, include a final Python code block implementing the solution, "
-                    "then terminate with a single line that begins with either "
-                    "'Final answer:' or '{\"final_answer\": \"...\"}' and stop immediately."
+                    "You are a careful engineer.\n"
+                    "You may think in a private scratchpad enclosed by <think>...</think>.\n"
+                    "Then provide the minimal correct solution.\n"
+                    "If coding helps, include ONE final Python code block implementing the solution.\n"
+                    "Terminate with exactly one of the following lines and STOP:\n"
+                    "  Final answer: <short text>\n"
+                    "  {\"final_answer\": \"<short text>\"}"
                 ),
             }
             self._rendered = []
@@ -231,7 +238,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         step_id = getattr(state, "global_step", None)
         base_scores: List[float] = []
         policy_pass_flags: List[bool] = []
-        for prompt_text, output, meta in zip(prompts, completions, metadata):
+        for idx, (prompt_text, output, meta) in enumerate(zip(prompts, completions, metadata)):
             score, stats = blended_reward(
                 output,
                 meta.get("tests", []),
@@ -301,7 +308,11 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
 
             opponent_pass_flags: List[bool] = []
             opponent_trace_stats: List[Dict[str, object]] = []
-            for opp_out, meta in zip(opponent_outputs, metadata):
+            assist_cfg = getattr(trainer, "_assist_cfg", {"enabled": False})
+            thinking_cfg = getattr(trainer, "_thinking", {"enabled": False})
+            teacher_provider = getattr(sp_manager, "teacher_provider", None)
+
+            for idx, (opp_out, meta) in enumerate(zip(opponent_outputs, metadata)):
                 opp_base, opp_stats = score_code_tests(
                     opp_out,
                     meta.get("tests", []),
@@ -313,6 +324,107 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 )
                 opponent_pass_flags.append(opp_base >= 1.0)
                 opponent_trace_stats.append(opp_stats)
+
+                if hasattr(trainer, "failure_logger"):
+                    try:
+                        base_prompt = prompts[idx]
+                        record = {
+                            "prompt": base_prompt,
+                            "tests": meta.get("tests", []),
+                            "timeout_s": meta.get("timeout_s", 2),
+                            "memory_mb": meta.get("memory_mb", 256),
+                        }
+                        policy_pass = policy_pass_flags[idx]
+                        opp_pass = opponent_pass_flags[-1]
+                        if (not policy_pass) and (not opp_pass):
+                            trainer.failure_logger.log(record)
+                        elif (not policy_pass) and opp_pass:
+                            record = dict(record)
+                            record["kind"] = "opponent_only"
+                            trainer.failure_logger.log(record)
+                    except Exception:
+                        pass
+
+                if assist_cfg.get("enabled", False) and teacher_provider is not None:
+                    neither = (not policy_pass_flags[idx]) and (not opponent_pass_flags[-1])
+                    opp_only = (not policy_pass_flags[idx]) and opponent_pass_flags[-1]
+                    trigger = False
+                    if neither and random.random() < float(assist_cfg.get("sample_prob_neither", 0.15)):
+                        trigger = True
+                    elif opp_only and random.random() < float(assist_cfg.get("sample_prob_opp_only", 0.10)):
+                        trigger = True
+
+                    if trigger:
+                        try:
+                            base_prompt = prompts[idx]
+                            modes = assist_cfg.get("modes", ["hint", "critique"])
+                            mode = modes[0] if modes else "hint"
+                            if mode == "critique" and completions[idx]:
+                                teacher_prompt = (
+                                    "Provide ONE short correction hint (not a full solution). "
+                                    "Use private reasoning inside <think>…</think> if needed, then output only the hint.\n\n"
+                                    f"Failed attempt:\n{completions[idx]}\n\nProblem:\n{base_prompt}"
+                                )
+                            else:
+                                teacher_prompt = (
+                                    "Provide ONE short hint to solve the problem. "
+                                    "You may think inside <think>…</think> first, then output only the hint.\n\n"
+                                    f"Problem:\n{base_prompt}"
+                                )
+
+                            hint = sp_manager.teacher_hint([teacher_prompt], int(assist_cfg.get("max_hint_tokens", 256)))[0]
+
+                            policy_extra = int(thinking_cfg.get("policy_budget_tokens", 0))
+                            retry_prompt = f"{hint}\n\n{base_prompt}"
+                            enc = tokenizer(retry_prompt, return_tensors="pt").to(model.device)
+                            gen_ids = model.generate(
+                                **enc,
+                                max_new_tokens=int(rlhf_cfg["max_completion_length"]) + policy_extra,
+                                do_sample=True,
+                                temperature=float(rlhf_cfg["temperature"]),
+                                top_p=float(rlhf_cfg["top_p"]),
+                                use_cache=True,
+                            )
+                            retry_text = tokenizer.decode(gen_ids[0], skip_special_tokens=True)
+
+                            retry_score, retry_stats = blended_reward(
+                                retry_text,
+                                meta.get("tests", []),
+                                {
+                                    "timeout_s": meta.get("timeout_s", 2),
+                                    "memory_mb": meta.get("memory_mb", 256),
+                                    "stderr": meta.get("stderr", ""),
+                                },
+                                collect_exec=log_executor_output,
+                                exec_store=exec_store,
+                                exec_max_bytes=exec_truncate_bytes,
+                            )
+
+                            retry_score = max(0.0, min(1.0, retry_score))
+                            completions[idx] = retry_text
+                            base_scores[idx] = retry_score
+                            policy_pass_flags[idx] = float(retry_stats.get("base", 0.0)) >= 1.0
+                            combined[idx] = (1.0 - weight) * base_scores[idx] + weight * sp_scores[idx]
+
+                            status = "pass" if policy_pass_flags[idx] else "fail"
+                            print(f"[Assist] step={step_id} index={idx} mode={mode} status={status}")
+
+                            if gen_logger is not None:
+                                event = {
+                                    "ts": time.time(),
+                                    "source": "assist",
+                                    "step": step_id,
+                                    "prompt": base_prompt[:200],
+                                    "hint": hint,
+                                    "retry": retry_text,
+                                    "score": retry_score,
+                                    "passed": policy_pass_flags[idx],
+                                }
+                                if log_executor_output and "exec_traces" in retry_stats:
+                                    event["exec_traces"] = retry_stats["exec_traces"]
+                                gen_logger.log(event)
+                        except Exception as assist_exc:
+                            print(f"[Assist] warning: {assist_exc}")
 
             if gen_logger is not None:
                 ts = time.time()
@@ -406,10 +518,14 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         "exec_store": exec_store,
         "exec_max_bytes": exec_max_bytes,
     }
+    trainer.failure_logger = failure_logger
+    trainer._thinking = cfg_map.get("thinking", {"enabled": False})
+    trainer._assist_cfg = cfg_map.get("teacher_assist", {"enabled": False})
     trainer_ref = trainer
     if sp_manager is not None:
         sp_manager.gen_logger = gen_logger
         sp_manager.trainer = trainer
+        trainer.sp_manager = sp_manager
     trainer.add_callback(TrainingMetricsCallback(out_dir=getattr(grpo_cfg, "output_dir", None)))
     if log_intersteps:
         class _StageLoggerCallback(TrainerCallback):
@@ -455,6 +571,11 @@ def main(config_path: str, *, max_steps: int | None = None) -> None:
         if hasattr(trainer, "gen_logger"):
             try:
                 trainer.gen_logger.close()
+            except Exception:
+                pass
+        if hasattr(trainer, "failure_logger"):
+            try:
+                trainer.failure_logger.close()
             except Exception:
                 pass
 
