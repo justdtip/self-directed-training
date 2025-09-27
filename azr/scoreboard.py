@@ -36,9 +36,20 @@ class ScoreBoard:
         self._lock = threading.Lock()
 
     def update_batch(self, policy_pass: list[bool], opponent_pass: list[bool]) -> None:
-        assert len(policy_pass) == len(opponent_pass)
+        p_flags = list(policy_pass)
+        o_flags = list(opponent_pass)
+        if len(p_flags) != len(o_flags):
+            diff = len(p_flags) - len(o_flags)
+            if diff > 0:
+                o_flags.extend([False] * diff)
+            else:
+                p_flags.extend([False] * (-diff))
+            print(
+                "[ScoreBoard] Warning: mismatched batch sizes; padding shorter list with failures "
+                f"(policy={len(p_flags)} opponent={len(o_flags)})"
+            )
         with self._lock:
-            for p, o in zip(policy_pass, opponent_pass):
+            for p, o in zip(p_flags, o_flags):
                 if p and o:
                     self.scores.both += 1
                 elif p and not o:

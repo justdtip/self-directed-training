@@ -118,6 +118,12 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
 
     max_prompt_len = int(rlhf_cfg["max_prompt_length"])
     max_completion_len = int(rlhf_cfg["max_completion_length"])
+    thinking_cfg = cfg_map.get("thinking", {}) or {}
+    policy_extra = int(thinking_cfg.get("policy_budget_tokens", 0))
+    if policy_extra:
+        max_completion_len += policy_extra
+        rlhf_cfg["max_completion_length"] = max_completion_len
+    opponent_extra = int(thinking_cfg.get("opponent_budget_tokens", 0))
 
     log_intersteps = bool(cfg_map.get("log_intersteps"))
     logging_cfg = cfg_map.get("logging", {}) or {}
@@ -359,27 +365,29 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                             base_prompt = prompts[idx]
                             modes = assist_cfg.get("modes", ["hint", "critique"])
                             mode = modes[0] if modes else "hint"
+                            tests_list = meta.get("tests", [])
+                            tests_section = ("\n\nTests to satisfy:\n" + "\n".join(tests_list)) if tests_list else ""
                             if mode == "critique" and completions[idx]:
                                 teacher_prompt = (
-                                    "Provide ONE short correction hint (not a full solution). "
-                                    "Use private reasoning inside <think>…</think> if needed, then output only the hint.\n\n"
-                                    f"Failed attempt:\n{completions[idx]}\n\nProblem:\n{base_prompt}"
+                                    "You are a mentor helping a junior engineer fix their code. "
+                                    "Think privately inside <think>...</think> but output only ONE short hint to correct the errors.\n\n"
+                                    f"Problem:\n{base_prompt}\n\nFailed attempt:\n{completions[idx]}{tests_section}"
                                 )
                             else:
                                 teacher_prompt = (
-                                    "Provide ONE short hint to solve the problem. "
-                                    "You may think inside <think>…</think> first, then output only the hint.\n\n"
-                                    f"Problem:\n{base_prompt}"
+                                    "You are a mentor guiding a junior engineer. "
+                                    "Think privately inside <think>...</think> but output only ONE short hint (no code) to help them solve the problem.\n\n"
+                                    f"Problem:\n{base_prompt}{tests_section}"
                                 )
 
                             hint = sp_manager.teacher_hint([teacher_prompt], int(assist_cfg.get("max_hint_tokens", 256)))[0]
 
-                            policy_extra = int(thinking_cfg.get("policy_budget_tokens", 0))
+                            # Policy extra tokens are already included in the base completion budget.
                             retry_prompt = f"{hint}\n\n{base_prompt}"
                             enc = tokenizer(retry_prompt, return_tensors="pt").to(model.device)
                             gen_ids = model.generate(
                                 **enc,
-                                max_new_tokens=int(rlhf_cfg["max_completion_length"]) + policy_extra,
+                                max_new_tokens=int(rlhf_cfg["max_completion_length"]),
                                 do_sample=True,
                                 temperature=float(rlhf_cfg["temperature"]),
                                 top_p=float(rlhf_cfg["top_p"]),
@@ -576,6 +584,11 @@ def main(config_path: str, *, max_steps: int | None = None) -> None:
         if hasattr(trainer, "failure_logger"):
             try:
                 trainer.failure_logger.close()
+            except Exception:
+                pass
+        if hasattr(trainer, "scoreboard"):
+            try:
+                trainer.scoreboard.write()
             except Exception:
                 pass
 

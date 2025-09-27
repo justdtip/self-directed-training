@@ -55,7 +55,7 @@ class TogetherAIOpponentProvider:
             "stop": ["Final answer:", "{\"final_answer\":"],
         }
         if self.thinking_budget:
-            # Many reasoning models honour this field. If ignored, behaviour remains unchanged.
+            # For models that support separate thinking budgets, request additional reasoning tokens.
             payload["max_thinking_tokens"] = self.thinking_budget
         if self.extra_body:
             # Shallow merge so config can override defaults when needed.

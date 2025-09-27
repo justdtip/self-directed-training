@@ -127,10 +127,13 @@ class SelfPlayManager:
         torch.cuda.synchronize()
 
     def generate_opponent(self, prompts: List[str], max_tokens: int) -> List[str]:
+        thinking_cfg = self.config_map.get("thinking", {}) or {}
+        opp_extra = int(thinking_cfg.get("opponent_budget_tokens", 0)) or 0
+        max_tokens_with_extra = max_tokens + opp_extra
         if self.remote_provider is not None:
             if self.log_intersteps:
                 print(f"[Stage] Remote opponent request start | prompts={len(prompts)}")
-            completions = asyncio.run(self.remote_provider.agenerate(prompts, max_tokens))
+            completions = asyncio.run(self.remote_provider.agenerate(prompts, max_tokens_with_extra))
             if self.log_intersteps:
                 print("[Stage] Remote opponent request done")
             stats = self.remote_provider.pop_stats()
@@ -176,7 +179,7 @@ class SelfPlayManager:
                 }
                 out = self.opponent.generate(
                     **inputs,
-                    max_new_tokens=max_tokens,
+                    max_new_tokens=max_tokens_with_extra,
                     do_sample=True,
                     temperature=0.7,
                     top_p=0.95,
