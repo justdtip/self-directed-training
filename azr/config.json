@@ -17,7 +17,8 @@
     "bf16": false,
     "gradient_accumulation_steps": 8,
     "temperature": 0.9,
-    "top_p": 0.92
+    "top_p": 0.92,
+    "retry_temperature": 0.3
   },
   "thinking": {
     "enabled": true,

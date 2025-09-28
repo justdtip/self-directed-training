@@ -268,6 +268,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 "tests": example.tests,
                 "timeout_s": example.timeout_s,
                 "memory_mb": example.memory_mb,
+                "orig_prompt": example.prompt,
             }
             return {"prompt": prompt, "metadata": meta}
 
@@ -427,15 +428,36 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                                 )
 
                             hint = sp_manager.teacher_hint([teacher_prompt], int(assist_cfg.get("max_hint_tokens", 256)))[0]
+                            hint_stripped = hint.strip()
+                            if hint_stripped.lower().startswith("final answer:"):
+                                hint = hint_stripped.split(":", 1)[1].lstrip()
+                            elif hint_stripped.startswith("{") and "final_answer" in hint_stripped:
+                                import re
+                                match = re.search(r'\{"final_answer"\s*:\s*"([^"]*)"\}', hint_stripped)
+                                if match:
+                                    hint = match.group(1)
 
-                            # Policy extra tokens are already included in the base completion budget.
-                            retry_prompt = f"{hint}\n\n{base_prompt}"
+                            retry_plain = f"{hint}\n\n{base_prompt}"
+                            try:
+                                retry_prompt = tokenizer.apply_chat_template(
+                                    [{"role": "user", "content": retry_plain}],
+                                    tokenize=False,
+                                    add_generation_prompt=True,
+                                    enable_thinking=True,
+                                )
+                            except TypeError:
+                                retry_prompt = tokenizer.apply_chat_template(
+                                    [{"role": "user", "content": retry_plain}],
+                                    tokenize=False,
+                                    add_generation_prompt=True,
+                                )
                             enc = tokenizer(retry_prompt, return_tensors="pt").to(model.device)
+                            retry_temp = float(rlhf_cfg.get("retry_temperature", rlhf_cfg["temperature"]))
                             gen_ids = model.generate(
                                 **enc,
                                 max_new_tokens=int(rlhf_cfg["max_completion_length"]),
                                 do_sample=True,
-                                temperature=float(rlhf_cfg["temperature"]),
+                                temperature=retry_temp,
                                 top_p=float(rlhf_cfg["top_p"]),
                                 use_cache=True,
                             )
