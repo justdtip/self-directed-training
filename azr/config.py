@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 import yaml
 
 
@@ -47,17 +47,28 @@ class AzrModelCfg:
     lora_alpha: int
     quantization: str
     device_map: object | None = "auto"
+    lora_target_modules: tuple[str, ...] | None = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AzrModelCfg":
         quant = data.get("quantization", "4bit")
         quant_str = "" if quant is None else str(quant)
+        modules = data.get("lora_target_modules")
+        modules_tuple: tuple[str, ...] | None = None
+        if modules is not None:
+            if isinstance(modules, str):
+                modules = [m.strip() for m in modules.split(",") if m.strip()]
+            if not isinstance(modules, Iterable):
+                raise TypeError("lora_target_modules must be a sequence of strings")
+            modules_tuple = tuple(str(m) for m in modules)
+
         return cls(
             model_id=str(data.get("model_id", "")),
             lora_r=int(data.get("lora_r", 16)),
             lora_alpha=int(data.get("lora_alpha", 32)),
             quantization=quant_str,
             device_map=data.get("device_map", "auto"),
+            lora_target_modules=modules_tuple,
         )
 
 

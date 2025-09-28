@@ -204,12 +204,58 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 ),
             }
             self._rendered = []
+            thinking_cfg_local = cfg_map.get("thinking", {}) or {}
+            want_template_thinking = bool(thinking_cfg_local.get("enabled", False))
+            template_thinking_supported: Optional[bool] = None
+            logged_status = False
+
             for ex in self.rows:
-                rendered = tokenizer.apply_chat_template(
-                    [sys_msg, {"role": "user", "content": ex.prompt}],
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
+                msgs = [sys_msg, {"role": "user", "content": ex.prompt}]
+                if want_template_thinking:
+                    if template_thinking_supported is None:
+                        try:
+                            rendered = tokenizer.apply_chat_template(
+                                msgs,
+                                tokenize=False,
+                                add_generation_prompt=True,
+                                enable_thinking=True,
+                            )
+                            template_thinking_supported = True
+                            if not logged_status:
+                                print("[Thinking] chat_template.enable_thinking=True (supported)")
+                                logged_status = True
+                        except TypeError:
+                            template_thinking_supported = False
+                            rendered = tokenizer.apply_chat_template(
+                                msgs,
+                                tokenize=False,
+                                add_generation_prompt=True,
+                            )
+                            if not logged_status:
+                                print(
+                                    "[Thinking] chat_template.enable_thinking not supported; continuing without it"
+                                )
+                                logged_status = True
+                    else:
+                        if template_thinking_supported:
+                            rendered = tokenizer.apply_chat_template(
+                                msgs,
+                                tokenize=False,
+                                add_generation_prompt=True,
+                                enable_thinking=True,
+                            )
+                        else:
+                            rendered = tokenizer.apply_chat_template(
+                                msgs,
+                                tokenize=False,
+                                add_generation_prompt=True,
+                            )
+                else:
+                    rendered = tokenizer.apply_chat_template(
+                        msgs,
+                        tokenize=False,
+                        add_generation_prompt=True,
+                    )
                 self._rendered.append(rendered)
 
         def __len__(self) -> int:

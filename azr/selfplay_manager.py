@@ -12,6 +12,7 @@ from .rewards import extract_last_code_block, score_code_tests
 from .modeling import load_tokenizer, setup_model
 from .config import AzrModelCfg, AzrSelfPlayCfg
 from .opponent_provider_together import TogetherAIOpponentProvider
+from .openai_provider import OpenAIResponsesProvider
 
 
 @dataclass
@@ -98,21 +99,29 @@ class SelfPlayManager:
 
         if teacher_cfg.get("source") == "remote":
             provider = teacher_cfg.get("provider")
-            if provider != "together_ai":
+            if provider == "together_ai":
+                self.teacher_provider = TogetherAIOpponentProvider(
+                    endpoint=teacher_cfg["endpoint"],
+                    model_id=teacher_cfg["model_id"],
+                    api_key_env=teacher_cfg["api_key_env"],
+                    max_concurrency=int(teacher_cfg.get("max_concurrency", 4)),
+                    temperature=float(teacher_cfg.get("temperature", 0.6)),
+                    top_p=float(teacher_cfg.get("top_p", 0.95)),
+                    extra_body=teacher_cfg.get("extra_body", {}),
+                    thinking_budget=int(thinking_cfg.get("teacher_budget_tokens", 0)) or None,
+                )
+            elif provider == "openai":
+                self.teacher_provider = OpenAIResponsesProvider(
+                    model_id=teacher_cfg["model_id"],
+                    api_key_env=teacher_cfg.get("api_key_env", "OPENAI_API_KEY"),
+                    api_base_env=teacher_cfg.get("api_base_env", "OPENAI_BASE_URL"),
+                    request_timeout=float(teacher_cfg.get("request_timeout", 120.0)),
+                    max_concurrency=int(teacher_cfg.get("max_concurrency", 4)),
+                    extra_body=teacher_cfg.get("extra_body", {}),
+                )
+            else:
                 raise ValueError(f"Unsupported teacher provider: {provider}")
-            self.teacher_provider = TogetherAIOpponentProvider(
-                endpoint=teacher_cfg["endpoint"],
-                model_id=teacher_cfg["model_id"],
-                api_key_env=teacher_cfg["api_key_env"],
-                max_concurrency=int(teacher_cfg.get("max_concurrency", 4)),
-                temperature=float(teacher_cfg.get("temperature", 0.6)),
-                top_p=float(teacher_cfg.get("top_p", 0.95)),
-                extra_body=teacher_cfg.get("extra_body", {}),
-                thinking_budget=int(thinking_cfg.get("teacher_budget_tokens", 0)) or None,
-            )
-            print(
-                f"[SelfPlay] Loaded teacher provider {provider} model={teacher_cfg['model_id']}"
-            )
+            print(f"[SelfPlay] Loaded teacher provider {provider} model={teacher_cfg['model_id']}")
 
         self.call_counter = 0
 

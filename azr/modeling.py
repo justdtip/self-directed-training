@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Iterable, Optional
 
 import torch
@@ -54,7 +55,11 @@ def setup_model(
     if bnb_config is not None:
         model = prepare_model_for_kbit_training(model)
 
-    modules = list(target_modules) if target_modules is not None else ["q_proj", "v_proj"]
+    modules_source = target_modules
+    if modules_source is None and getattr(cfg, "lora_target_modules", None):
+        modules_source = cfg.lora_target_modules
+    modules = list(modules_source) if modules_source is not None else ["q_proj", "v_proj"]
+    console.print(f"LoRA target modules: {json.dumps(modules)}")
     peft_cfg = LoraConfig(
         r=cfg.lora_r,
         lora_alpha=cfg.lora_alpha,
