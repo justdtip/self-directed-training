@@ -44,7 +44,9 @@ from .config import AzrModelCfg, AzrTrainingCfg
 from .data import DataExample, load_dataset
 from .modeling import load_tokenizer, setup_model
 from .simple_rewards import combine_rewards, keyword_reward, length_penalty
+from .codegate import infer_function_name
 from .utils import console
+from .prompts_assist import format_system_prompt
 
 
 def _merge_rlhf(cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -121,17 +123,27 @@ def build_trainer(
     class PromptDataset:
         def __init__(self, rows: List[DataExample]) -> None:
             self.rows = rows
+            self._system_prompt = format_system_prompt(False)
 
         def __len__(self) -> int:
             return len(self.rows)
 
         def __getitem__(self, idx: int) -> Dict[str, Any]:
             ex = self.rows[idx]
+            prompt = tokenizer.apply_chat_template(
+                [
+                    {"role": "system", "content": self._system_prompt},
+                    {"role": "user", "content": ex.prompt},
+                ],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
             return {
-                "prompt": ex.prompt,
+                "prompt": prompt,
                 "tests": ex.tests,
                 "timeout_s": ex.timeout_s,
                 "memory_mb": ex.memory_mb,
+                "func_name": infer_function_name(ex.tests, ex.prompt),
             }
 
     dataset = PromptDataset(examples)
@@ -186,7 +198,8 @@ def build_trainer(
         train_dataset=dataset,
     )
     # Align lm_head dtype with the model's parameters to avoid Float/BFloat16 errors.
-    trainer.add_callback(_EnsureLmHeadDtype())
+    if hasattr(trainer, "add_callback"):
+        trainer.add_callback(_EnsureLmHeadDtype())
     return trainer
 
 

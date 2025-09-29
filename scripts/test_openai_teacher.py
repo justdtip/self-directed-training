@@ -66,13 +66,21 @@ def main() -> None:
         "--effort",
         default="high",
         choices=["low", "medium", "high"],
-        help="Reasoning effort level passed via extra_body",
+        help="Reasoning effort level (kept for compatibility; Responses currently ignore it)",
+    )
+    parser.add_argument(
+        "--max-new-tokens",
+        dest="max_new_tokens",
+        type=int,
+        default=768,
+        help="Maximum tokens to request from the teacher model (default: 768)",
     )
     parser.add_argument(
         "--max_tokens",
+        dest="legacy_max_tokens",
         type=int,
-        default=10000,
-        help="Maximum hint tokens to request",
+        default=None,
+        help="Deprecated alias for --max-new-tokens",
     )
     args = parser.parse_args()
 
@@ -90,13 +98,13 @@ def main() -> None:
     sample = random.choice(examples)
     user_prompt = _build_prompt(sample)
 
-    provider = OpenAIResponsesProvider(
-        model_id=args.model,
-        extra_body={"reasoning": {"effort": args.effort}},
-    )
+    provider = OpenAIResponsesProvider(model_id=args.model)
 
     async def _run() -> None:
-        hints = await provider.agenerate([user_prompt], args.max_tokens)
+        max_tokens = args.max_new_tokens
+        if args.legacy_max_tokens is not None:
+            max_tokens = args.legacy_max_tokens
+        hints = await provider.agenerate([user_prompt], max_tokens)
         hint = hints[0] if hints else ""
         print((hint or "").strip())
 

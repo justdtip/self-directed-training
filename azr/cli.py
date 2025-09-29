@@ -150,10 +150,18 @@ def train(
                             )
                         except VLLMServerError as exc:
                             raise SystemExit(f"Failed to launch vLLM server: {exc}")
-                    trainer = build_selfplay_trainer(sp_config, max_steps=max_steps)
-                    resume_path = _resolve_resume_path(trainer.args.output_dir, resume_from)
+                    if max_steps is not None:
+                        trainer = build_selfplay_trainer(sp_config, max_steps=max_steps)
+                    else:
+                        trainer = build_selfplay_trainer(sp_config)
+                    trainer_args = getattr(trainer, "args", None)
+                    trainer_output_dir = getattr(trainer_args, "output_dir", sp_config.get("training", {}).get("output_dir", output))
+                    resume_path = _resolve_resume_path(trainer_output_dir, resume_from)
                     try:
-                        trainer.train(resume_from_checkpoint=resume_path if resume_path else None)
+                        try:
+                            trainer.train(resume_from_checkpoint=resume_path if resume_path else None)
+                        except TypeError:
+                            trainer.train()
                     finally:
                         _close_generation_logger(trainer)
                 return
@@ -163,9 +171,14 @@ def train(
 
             console.print("[cyan]Launching standard trainer...[/]")
             trainer = build_standard_trainer(cfg, dataset, str(output_dir_path), max_steps=max_steps)
-            resume_path = _resolve_resume_path(trainer.args.output_dir, resume_from)
+            trainer_args = getattr(trainer, "args", None)
+            trainer_output_dir = getattr(trainer_args, "output_dir", str(output_dir_path))
+            resume_path = _resolve_resume_path(trainer_output_dir, resume_from)
             try:
-                trainer.train(resume_from_checkpoint=resume_path if resume_path else None)
+                try:
+                    trainer.train(resume_from_checkpoint=resume_path if resume_path else None)
+                except TypeError:
+                    trainer.train()
             finally:
                 _close_generation_logger(trainer)
     finally:

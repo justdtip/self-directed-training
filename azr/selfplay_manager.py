@@ -22,6 +22,21 @@ class SelfPlayResult:
     score: float
 
 
+def _flatten_messages(messages: List[Dict[str, object]]) -> str:
+    parts: List[str] = []
+    for entry in messages:
+        role = str(entry.get("role", "user"))
+        content_items = entry.get("content", [])  # type: ignore[assignment]
+        for item in content_items:  # type: ignore[assignment]
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("value")
+                if isinstance(text, str):
+                    parts.append(f"{role}: {text}")
+            elif isinstance(item, str):
+                parts.append(f"{role}: {item}")
+    return "\n".join(parts)
+
+
 class SelfPlayManager:
     """Manages remote/local opponents and optional teacher assistance."""
 
@@ -142,7 +157,17 @@ class SelfPlayManager:
         if self.remote_provider is not None:
             if self.log_intersteps:
                 print(f"[Stage] Remote opponent request start | prompts={len(prompts)}")
-            completions = asyncio.run(self.remote_provider.agenerate(prompts, max_tokens_with_extra))
+            while True:
+                try:
+                    completions = asyncio.run(self.remote_provider.agenerate(prompts, max_tokens_with_extra))
+                    break
+                except RuntimeError as exc:
+                    msg = str(exc)
+                    if "status 503" in msg:
+                        print("[Remote] Opponent returned 503; retrying in 5s")
+                        time.sleep(5)
+                        continue
+                    raise
             if self.log_intersteps:
                 print("[Stage] Remote opponent request done")
             stats = self.remote_provider.pop_stats()
@@ -199,10 +224,17 @@ class SelfPlayManager:
                     print(f"[Stage] Opponent completion done | len={len(decoded)}")
         return outs
 
-    def teacher_hint(self, prompts: List[str], max_tokens: int) -> List[str]:
+    def teacher_hint(self, prompts: List[object], max_tokens: int) -> List[str]:
         if self.teacher_provider is None:
             return ["" for _ in prompts]
-        return asyncio.run(self.teacher_provider.agenerate(prompts, max_tokens))
+        formatted: List[object] = []
+        accepts_structured = bool(getattr(self.teacher_provider, "accepts_structured_prompts", False))
+        for prompt in prompts:
+            if isinstance(prompt, list) and not accepts_structured:
+                formatted.append(_flatten_messages(prompt))
+            else:
+                formatted.append(prompt)
+        return asyncio.run(self.teacher_provider.agenerate(formatted, max_tokens))
 
     def compute_scores(
         self,

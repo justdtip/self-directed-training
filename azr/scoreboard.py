@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import json
 import threading
 from dataclasses import dataclass
 from math import sqrt
 from pathlib import Path
 from typing import Optional
+
+from .logging_io import atomic_write_json, atomic_write_text
 
 
 @dataclass
@@ -106,7 +107,7 @@ class ScoreBoard:
             stats_lines.append(f"Wilson 95% CI: n/a  z={z}")
 
         txt += "\n".join(stats_lines) + "\n"
-        (self.out_dir / "scoreboard.txt").write_text(txt, encoding="utf-8")
+        atomic_write_text(self.out_dir / "scoreboard.txt", txt)
 
         data = dict(counts)
         data.update(
@@ -121,7 +122,7 @@ class ScoreBoard:
                 "z": z,
             }
         )
-        (self.out_dir / "scoreboard.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+        atomic_write_json(self.out_dir / "scoreboard.json", data)
 
 
 __all__ = ["ScoreBoard", "Scores"]
