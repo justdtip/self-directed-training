@@ -79,7 +79,8 @@
   "logging": {
     "log_executor_output": true,
     "exec_store": "fail_first",
-    "exec_max_bytes": 4096
+    "exec_max_bytes": 4096,
+    "debug_full_logs": true
   },
   "log_intersteps": true
 }

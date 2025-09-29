@@ -128,10 +128,16 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     log_intersteps = bool(cfg_map.get("log_intersteps"))
     logging_cfg = cfg_map.get("logging", {}) or {}
     log_executor_output = bool(logging_cfg.get("log_executor_output", False))
+    debug_full_logs = bool(logging_cfg.get("debug_full_logs", False))
     exec_store = str(logging_cfg.get("exec_store", "fail_first"))
     exec_max_bytes_val = logging_cfg.get("exec_max_bytes")
     exec_max_bytes = int(exec_max_bytes_val) if exec_max_bytes_val is not None else None
-    exec_truncate_bytes = exec_max_bytes if exec_max_bytes is not None else 4096
+    if debug_full_logs:
+        exec_max_bytes = None
+    if exec_max_bytes is not None:
+        exec_truncate_bytes = exec_max_bytes
+    else:
+        exec_truncate_bytes = None if debug_full_logs else 4096
 
     sp_manager: SelfPlayManager | None = None
     if sp_cfg.enabled:
@@ -181,6 +187,8 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         flush_every=200,
         redact_prompt=False,
         max_bytes=exec_max_bytes,
+        pretty_print=debug_full_logs,
+        write_text_log=debug_full_logs,
     )
     scoreboard = ScoreBoard(out_dir=output_dir)
     failure_logger = FailureLogger(out_dir=output_dir)
@@ -322,6 +330,8 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 }
                 if log_executor_output and "exec_traces" in stats:
                     payload["exec_traces"] = stats["exec_traces"]
+                if debug_full_logs:
+                    payload["user_prompt"] = meta.get("orig_prompt", "")
                 gen_logger.log(payload)
         # --- BEGIN interstep logging ---
         if cfg_map.get("log_intersteps"):
@@ -437,17 +447,34 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                                 if match:
                                     hint = match.group(1)
 
-                            retry_plain = f"{hint}\n\n{base_prompt}"
+                            sys_instructions = (
+                                "You are a careful engineer.\n"
+                                "You may think in a private scratchpad enclosed by <think>...</think>.\n"
+                                "Then provide the minimal correct solution.\n"
+                                "If coding helps, include ONE final Python code block implementing the solution.\n"
+                                "Terminate with exactly one of the following lines and STOP:\n"
+                                "  Final answer: <short text>\n"
+                                "  {\"final_answer\": \"<short text>\"}"
+                            )
+                            user_prompt = meta.get("orig_prompt", base_prompt)
+                            hint_clean = (hint or "").strip()
+                            if not hint_clean:
+                                hint_clean = "Please solve the task."
+                            retry_messages = [
+                                {"role": "system", "content": sys_instructions},
+                                {"role": "user", "content": user_prompt},
+                                {"role": "assistant", "content": hint_clean},
+                            ]
                             try:
                                 retry_prompt = tokenizer.apply_chat_template(
-                                    [{"role": "user", "content": retry_plain}],
+                                    retry_messages,
                                     tokenize=False,
                                     add_generation_prompt=True,
                                     enable_thinking=True,
                                 )
                             except TypeError:
                                 retry_prompt = tokenizer.apply_chat_template(
-                                    [{"role": "user", "content": retry_plain}],
+                                    retry_messages,
                                     tokenize=False,
                                     add_generation_prompt=True,
                                 )
@@ -486,16 +513,21 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                             print(f"[Assist] step={step_id} index={idx} mode={mode} status={status}")
 
                             if gen_logger is not None:
+                                prompt_log_value = prompts[idx] if debug_full_logs else base_prompt[:200]
                                 event = {
                                     "ts": time.time(),
                                     "source": "assist",
                                     "step": step_id,
-                                    "prompt": base_prompt[:200],
+                                    "prompt": prompt_log_value,
                                     "hint": hint,
                                     "retry": retry_text,
                                     "score": retry_score,
                                     "passed": policy_pass_flags[idx],
                                 }
+                                if debug_full_logs:
+                                    event["retry_prompt"] = retry_prompt
+                                    event["assist_messages"] = retry_messages
+                                    event["hint_mode"] = mode
                                 if log_executor_output and "exec_traces" in retry_stats:
                                     event["exec_traces"] = retry_stats["exec_traces"]
                                 gen_logger.log(event)
@@ -593,6 +625,8 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         "log_executor_output": log_executor_output,
         "exec_store": exec_store,
         "exec_max_bytes": exec_max_bytes,
+        "exec_truncate_bytes": exec_truncate_bytes,
+        "debug_full_logs": debug_full_logs,
     }
     trainer.failure_logger = failure_logger
     trainer._thinking = cfg_map.get("thinking", {"enabled": False})
