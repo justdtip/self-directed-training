@@ -10,7 +10,7 @@
   "rlhf": {
     "num_generations": 4,
     "max_prompt_length": 2048,
-    "max_completion_length": 384,
+    "max_completion_length": 1024,
     "importance_sampling_level": "sequence",
     "clip_range_ratio": 0.1,
     "kl_coeff": 0.0,
@@ -18,15 +18,18 @@
     "gradient_accumulation_steps": 8,
     "temperature": 0.9,
     "top_p": 0.92,
-    "retry_temperature": 0.3
+    "retry_temperature": 0.2
+  },
+  "penalties": {
+    "format_error_penalty": 0.02
   },
   "thinking": {
     "enabled": true,
     "tag_open": "<think>",
     "tag_close": "</think>",
     "strip_for_reward": true,
-    "policy_budget_tokens": 1536,
-    "opponent_budget_tokens": 1536,
+    "policy_budget_tokens": 768,
+    "opponent_budget_tokens": 768,
     "teacher_budget_tokens": 4096,
     "policy_enable_thinking": true,
     "opponent_enable_thinking": true
@@ -63,9 +66,7 @@
     "request_timeout": 120.0,
     "max_concurrency": 4,
     "extra_body": {
-      "reasoning": {
-        "effort": "high"
-      }
+      "stop": ["```", "Final answer:"]
     }
   },
   "teacher_assist": {
@@ -73,7 +74,7 @@
     "modes": ["hint", "critique"],
     "sample_prob_neither": 0.15,
     "sample_prob_opp_only": 0.1,
-    "max_hint_tokens": 10000
+    "max_hint_tokens": 384
   },
   "data": {
     "train_path": "azr/data/train.jsonl"

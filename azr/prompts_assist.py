@@ -17,11 +17,20 @@ _BASE_SYSTEM_PROMPT = (
     "3) Do NOT output explanations, analysis, comments, or any scratchpad text.\n"
 )
 
+# Teacher should NOT output code; it should give a compact, actionable hint only.
+_TEACHER_HINT_SYSTEM = (
+    "You are a mentor. Provide ONE short, actionable hint (≤30 words). "
+    "No code. No final answers. No explanations. Plain English only."
+)
+
 
 def format_system_prompt(allow_thinking: bool) -> str:
     if allow_thinking:
-        return _BASE_SYSTEM_PROMPT
+        # Policy/opponent: thinking allowed internally, but never surfaced.
+        return _BASE_SYSTEM_PROMPT + "4) Do NOT write out your scratchpad. Never include <think> or similar tags.\n"
     return _BASE_SYSTEM_PROMPT + "4) Do NOT output any hidden reasoning markup. Never emit tags such as <think> or similar.\n"
+
+ASSIST_SYSTEM_STRICT = format_system_prompt(False)
 
 CODE_GATE_SYSTEM_NUDGE = (
     "IMPORTANT: The previous attempt did not include valid Python code. Output exactly one ```python code block"
@@ -31,17 +40,11 @@ CODE_GATE_SYSTEM_NUDGE = (
 
 
 def build_assist_messages(user_prompt: str, allow_thinking: bool = False) -> List[Dict[str, object]]:
-    """Construct a Responses-style messages payload for the teacher model."""
+    """Construct a Responses-style messages payload for the teacher model (short hint only)."""
 
     return [
-        {
-            "role": "system",
-            "content": [{"type": "input_text", "text": format_system_prompt(allow_thinking)}],
-        },
-        {
-            "role": "user",
-            "content": [{"type": "input_text", "text": user_prompt}],
-        },
+        {"role": "system", "content": [{"type": "input_text", "text": _TEACHER_HINT_SYSTEM}]},
+        {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]},
     ]
 
 

@@ -23,7 +23,7 @@ from .generation_logger import GenerationLogger
 from .failure_logger import FailureLogger
 from .scoreboard import ScoreBoard
 from .prompts_assist import (
-    format_system_prompt,
+    ASSIST_SYSTEM_STRICT,
     CODE_GATE_SYSTEM_NUDGE,
     build_assist_messages,
     build_retry_messages,
@@ -138,6 +138,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         rlhf_cfg["max_completion_length"] = max_completion_len
     opponent_extra = int(thinking_cfg.get("opponent_budget_tokens", 0))
     policy_enable_thinking = bool(thinking_cfg.get("policy_enable_thinking", False))
+    opponent_enable_thinking = bool(thinking_cfg.get("opponent_enable_thinking", False))
 
     log_intersteps = bool(cfg_map.get("log_intersteps"))
     logging_cfg = cfg_map.get("logging", {}) or {}
@@ -215,53 +216,80 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     trainer_ref: Optional[GRPOTrainerWithStop] = None
 
     class PromptDataset:
+        _thinking_flags_logged = False
+
         def __init__(self, rows) -> None:
             self.rows = rows
+            system_prompt_text = ASSIST_SYSTEM_STRICT
+            sys_msg = {"role": "system", "content": system_prompt_text}
+            self._rendered = []
             thinking_cfg_local = cfg_map.get("thinking", {}) or {}
-            self._policy_thinking = bool(thinking_cfg_local.get("policy_enable_thinking", False))
-            self._opponent_thinking = bool(thinking_cfg_local.get("opponent_enable_thinking", False))
-            self._policy_prompts: List[str] = []
-            self._opponent_prompts: List[str] = []
-
-            def _render(messages: List[Dict[str, str]], allow_thinking: bool, tag: str) -> str:
-                kwargs = {"tokenize": False, "add_generation_prompt": True}
-                if allow_thinking:
-                    kwargs["enable_thinking"] = True
-                try:
-                    return tokenizer.apply_chat_template(messages, **kwargs)
-                except TypeError:
-                    if allow_thinking:
-                        print(f"[Thinking] chat_template.enable_thinking unsupported for {tag}; falling back")
-                    kwargs.pop("enable_thinking", None)
-                    return tokenizer.apply_chat_template(messages, **kwargs)
-
-            policy_system_prompt = format_system_prompt(self._policy_thinking)
-            opponent_system_prompt = format_system_prompt(self._opponent_thinking)
+            if not PromptDataset._thinking_flags_logged:
+                print(
+                    f"[Thinking] policy_enable_thinking={policy_enable_thinking} "
+                    f"opponent_enable_thinking={opponent_enable_thinking}"
+                )
+                PromptDataset._thinking_flags_logged = True
+            want_template_thinking = bool(thinking_cfg_local.get("enabled", False) or policy_enable_thinking)
+            template_thinking_supported: Optional[bool] = None
+            logged_status = False
 
             for ex in self.rows:
-                policy_msgs = [
-                    {"role": "system", "content": policy_system_prompt},
-                    {"role": "user", "content": ex.prompt},
-                ]
-                opponent_msgs = [
-                    {"role": "system", "content": opponent_system_prompt},
-                    {"role": "user", "content": ex.prompt},
-                ]
-                self._policy_prompts.append(_render(policy_msgs, self._policy_thinking, "policy"))
-                self._opponent_prompts.append(_render(opponent_msgs, self._opponent_thinking, "opponent"))
+                msgs = [sys_msg, {"role": "user", "content": ex.prompt}]
+                if want_template_thinking:
+                    if template_thinking_supported is None:
+                        try:
+                            kwargs = {"tokenize": False, "add_generation_prompt": True}
+                            if policy_enable_thinking:
+                                kwargs["enable_thinking"] = True
+                            rendered = tokenizer.apply_chat_template(msgs, **kwargs)
+                            template_thinking_supported = True
+                            if not logged_status:
+                                state = "enabled" if policy_enable_thinking else "disabled"
+                                print(f"[Thinking] chat_template.enable_thinking {state} (policy)")
+                                logged_status = True
+                        except TypeError:
+                            template_thinking_supported = False
+                            rendered = tokenizer.apply_chat_template(
+                                msgs,
+                                tokenize=False,
+                                add_generation_prompt=True,
+                            )
+                            if not logged_status:
+                                print(
+                                    "[Thinking] chat_template.enable_thinking not supported; continuing without it"
+                                )
+                                logged_status = True
+                    else:
+                        if template_thinking_supported:
+                            kwargs = {"tokenize": False, "add_generation_prompt": True}
+                            if policy_enable_thinking:
+                                kwargs["enable_thinking"] = True
+                            rendered = tokenizer.apply_chat_template(msgs, **kwargs)
+                        else:
+                            rendered = tokenizer.apply_chat_template(
+                                msgs,
+                                tokenize=False,
+                                add_generation_prompt=True,
+                            )
+                else:
+                    kwargs = {"tokenize": False, "add_generation_prompt": True}
+                    if policy_enable_thinking:
+                        kwargs["enable_thinking"] = True
+                    rendered = tokenizer.apply_chat_template(msgs, **kwargs)
+                self._rendered.append(rendered)
 
         def __len__(self) -> int:
             return len(self.rows)
 
         def __getitem__(self, index: int) -> Dict[str, Any]:
             example = self.rows[index]
-            prompt = self._policy_prompts[index]
+            prompt = self._rendered[index]
             meta = {
                 "tests": example.tests,
                 "timeout_s": example.timeout_s,
                 "memory_mb": example.memory_mb,
                 "orig_prompt": example.prompt,
-                "opponent_prompt": self._opponent_prompts[index],
             }
             func_name = infer_function_name(example.tests, example.prompt)
             if func_name:
@@ -292,6 +320,64 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             except (TypeError, ValueError):
                 return None
 
+        def _classify_reason(
+            stats: Dict[str, Any] | None,
+            passed: bool,
+            meta: Dict[str, Any] | None = None,
+        ) -> Optional[str]:
+            if passed:
+                return None
+            if not isinstance(stats, dict):
+                stats = {}
+
+            reason = stats.get("reason")
+            if isinstance(reason, str) and reason:
+                return reason
+
+            def _reason_from_text(payload: object) -> Optional[str]:
+                if not isinstance(payload, str) or not payload:
+                    return None
+                upper = payload.upper()
+                if "TIMEOUT" in upper or "KILLED" in upper:
+                    return "timeout"
+                if "MEMORYERROR" in upper or "OOM" in upper:
+                    return "memory_error"
+                if "ASSERT" in upper:
+                    return "assertion_failed"
+                if "TRACEBACK" in upper or "EXCEPTION" in upper:
+                    return "exec_error"
+                return None
+
+            traces = stats.get("exec_traces")
+            if isinstance(traces, list) and traces:
+                primary = traces[0]
+                if isinstance(primary, dict):
+                    text_reason = _reason_from_text(primary.get("stderr"))
+                    if text_reason:
+                        return text_reason
+                    ret_code = primary.get("returncode")
+                    if isinstance(ret_code, int) and ret_code != 0:
+                        return "exec_error"
+
+            if isinstance(meta, dict):
+                meta_reason = _reason_from_text(meta.get("stderr"))
+                if meta_reason:
+                    return meta_reason
+
+            passes = stats.get("passes")
+            total = stats.get("total")
+            if isinstance(total, int):
+                if total == 0:
+                    return "no_tests"
+                if isinstance(passes, int) and passes < total:
+                    return "tests_failed"
+
+            base_val = stats.get("base")
+            if isinstance(base_val, (int, float)) and base_val < 1.0:
+                return "score_below_threshold"
+
+            return None
+
         step_id = getattr(state, "global_step", None)
         base_scores: List[float] = []
         policy_pass_flags: List[bool] = []
@@ -309,8 +395,16 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 exec_max_bytes=exec_truncate_bytes,
             )
             score = max(0.0, min(1.0, score))
+            penalties = cfg_map.get("penalties", {}) or {}
+            if stats.get("reason") == "format_error":
+                fmt_pen = float(penalties.get("format_error_penalty", 0.0))
+                if fmt_pen > 0.0:
+                    score = max(0.0, score - fmt_pen)
             base_scores.append(score)
-            policy_pass = float(stats.get("base", 0.0)) >= 1.0
+            if stats.get("reason") == "format_error":
+                policy_pass = False
+            else:
+                policy_pass = float(stats.get("base", 0.0)) >= 1.0
             policy_pass_flags.append(policy_pass)
             if gen_logger is not None:
                 payload = {
@@ -338,6 +432,9 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 "func_name": meta.get("func_name"),
                 "retries": 0,
             }
+            reason = _classify_reason(stats, policy_pass, meta)
+            if reason:
+                metrics_record["reason"] = reason
             append_jsonl(metrics_path, metrics_record)
         # --- BEGIN interstep logging ---
         if cfg_map.get("log_intersteps"):
@@ -431,19 +528,45 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                             mode = modes[0] if modes else "hint"
                             tests_list = meta.get("tests", [])
 
-                            assist_sections: List[str] = []
-                            assist_sections.append("Instruction: Implement the requested Python function exactly as specified.")
                             user_orig = meta.get("orig_prompt", base_prompt)
-                            assist_sections.append(f"Problem:\n{user_orig}")
+                            assist_user_prompt_parts: List[str] = []
+                            assist_user_prompt_parts.append(f"Problem:\n{user_orig}")
                             if tests_list:
-                                assist_sections.append("Tests (must all pass):\n" + "\n".join(tests_list))
+                                assist_user_prompt_parts.append("Tests (must all pass):\n" + "\n".join(tests_list))
                             if mode == "critique" and completions[idx]:
-                                assist_sections.append("Failed attempt:\n" + completions[idx])
-                            assist_user_prompt = "\n\n".join(assist_sections)
+                                assist_user_prompt_parts.append("Failed attempt:\n" + completions[idx])
+                            assist_user_prompt = "\n\n".join(assist_user_prompt_parts)
 
                             teacher_messages = build_assist_messages(assist_user_prompt)
-                            hint = sp_manager.teacher_hint([teacher_messages], int(assist_cfg.get("max_hint_tokens", 256)))[0]
-                            hint_clean = hint.strip()
+                            hint_tokens = int(assist_cfg.get("max_hint_tokens", 256))
+                            try:
+                                hint_raw = sp_manager.teacher_hint([teacher_messages], hint_tokens)[0]
+                            except Exception as e:
+                                msg = str(e)
+                                if "OpenAI Responses incomplete: max_output_tokens" in msg:
+                                    # Retry once with an expanded token budget but enforce an upper bound.
+                                    boosted_tokens = min(1024, max(hint_tokens * 2, hint_tokens + 128))
+                                    hint_raw = sp_manager.teacher_hint([teacher_messages], boosted_tokens)[0]
+                                    hint_tokens = boosted_tokens
+                                else:
+                                    raise
+                            hint_clean = hint_raw.strip()
+                            if hint_clean.lower().startswith("final answer:"):
+                                hint_clean = hint_clean.split(":", 1)[1].lstrip()
+                            json_match = re.search(
+                                r'\{"final_answer"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"\}',
+                                hint_clean,
+                                flags=re.IGNORECASE,
+                            )
+                            if json_match:
+                                hint_clean = json_match.group(1).encode("utf-8").decode("unicode_escape")
+                            hint_clean = "".join(ch for ch in hint_clean if ord(ch) < 128)
+                            hint_clean = " ".join(hint_clean.split())
+                            if len(hint_clean) > 300:
+                                truncated = hint_clean[:300]
+                                if " " in truncated:
+                                    truncated = truncated[: truncated.rfind(" ")]
+                                hint_clean = truncated
 
                             func_name = meta.get("func_name")
                             max_gate_attempts = 2
@@ -473,9 +596,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                                 return flat
 
                             for gate_attempt in range(max_gate_attempts):
-                                structured_retry_messages = build_retry_messages(
-                                    user_orig, hint_clean, allow_thinking=policy_enable_thinking
-                                )
+                                structured_retry_messages = build_retry_messages(user_orig, hint_clean)
                                 if gate_attempt > 0:
                                     structured_retry_messages.append(
                                         {
@@ -588,6 +709,9 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                                 "func_name": meta.get("func_name"),
                                 "retries": int(max(0, retries_used)),
                             }
+                            assist_reason = _classify_reason(retry_stats, policy_pass_flags[idx], meta)
+                            if assist_reason:
+                                metrics_record["reason"] = assist_reason
                             append_jsonl(metrics_path, metrics_record)
                         except Exception as assist_exc:
                             print(f"[Assist] warning: {assist_exc}")
@@ -638,6 +762,9 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     "func_name": meta.get("func_name"),
                     "retries": 0,
                 }
+                opponent_reason = _classify_reason(opp_stats, opp_pass, meta)
+                if opponent_reason:
+                    metrics_record["reason"] = opponent_reason
                 append_jsonl(metrics_path, metrics_record)
 
             if scoreboard is not None and policy_pass_flags:

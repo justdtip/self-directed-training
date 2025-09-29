@@ -10,6 +10,24 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _CODE_BLOCK_RE = re.compile(r"```(?:python)?\s*(.*?)````", re.DOTALL | re.IGNORECASE)
 
 
+def _validate_answer_format(text: str) -> bool:
+    """Ensure the completion contains exactly one python block and a final answer line."""
+
+    if not text:
+        return False
+    scrubbed = _THINK_RE.sub("", text)
+    blocks = list(re.finditer(r"```python\b[\s\S]*?```", scrubbed, flags=re.IGNORECASE))
+    if len(blocks) != 1:
+        return False
+    tail = scrubbed[blocks[-1].end():]
+    tail_lower = tail.lower()
+    if "final answer:" in tail_lower:
+        return True
+    if '"final_answer"' in tail_lower:
+        return True
+    return False
+
+
 def extract_last_code_block(text: str) -> str | None:
     """Return the last fenced code block, ignoring private thinking spans."""
 
@@ -39,9 +57,11 @@ def score_code_tests(
         return base, {"passes": 0, "total": 0}
 
     sanitized_output = _THINK_RE.sub("", model_output)
+    if not _validate_answer_format(model_output):
+        return 0.0, {"passes": 0, "total": total, "reason": "format_error"}
     code = extract_last_code_block(sanitized_output)
     if code is None:
-        return 0.0, {"passes": 0, "total": total}
+        return 0.0, {"passes": 0, "total": total, "reason": "format_error"}
 
     def _truncate(text: str | None) -> str:
         if text is None:
@@ -109,6 +129,9 @@ def blended_reward(
     exec_max_bytes: int = 4096,
 ) -> Tuple[float, Dict[str, float]]:
     """Combine code pass rate with minor style/timeout bonuses."""
+
+    if not _validate_answer_format(model_output):
+        return 0.0, {"reason": "format_error"}
 
     timeout_s = extra.get("timeout_s", 2) if extra else 2
     memory_mb = extra.get("memory_mb", 256) if extra else 256
