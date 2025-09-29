@@ -27,7 +27,9 @@
     "strip_for_reward": true,
     "policy_budget_tokens": 1536,
     "opponent_budget_tokens": 1536,
-    "teacher_budget_tokens": 4096
+    "teacher_budget_tokens": 4096,
+    "policy_enable_thinking": true,
+    "opponent_enable_thinking": true
   },
   "training": {
     "lr": 1e-05,

@@ -22,6 +22,19 @@ from .callbacks import TrainingMetricsCallback
 from .generation_logger import GenerationLogger
 from .failure_logger import FailureLogger
 from .scoreboard import ScoreBoard
+from .prompts_assist import (
+    format_system_prompt,
+    CODE_GATE_SYSTEM_NUDGE,
+    build_assist_messages,
+    build_retry_messages,
+)
+from .codegate import (
+    CodeGateError,
+    extract_last_python_block,
+    has_function_signature,
+    infer_function_name,
+)
+from .logging_io import append_jsonl
 
 _GRPO_SUPPORTS_CLIP_RANGE = "clip_range_ratio" in signature(GRPOConfig).parameters
 _GRPO_SUPPORTS_TOKENIZER_ARG = "tokenizer" in signature(GRPOTrainerWithStop.__init__).parameters
@@ -124,6 +137,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         max_completion_len += policy_extra
         rlhf_cfg["max_completion_length"] = max_completion_len
     opponent_extra = int(thinking_cfg.get("opponent_budget_tokens", 0))
+    policy_enable_thinking = bool(thinking_cfg.get("policy_enable_thinking", False))
 
     log_intersteps = bool(cfg_map.get("log_intersteps"))
     logging_cfg = cfg_map.get("logging", {}) or {}
@@ -141,13 +155,17 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
 
     sp_manager: SelfPlayManager | None = None
     if sp_cfg.enabled:
-        sp_manager = SelfPlayManager(
-            model_cfg,
-            sp_cfg,
-            opponent_device=sp_cfg.device,
-            log_intersteps=log_intersteps,
-            config_map=cfg_map,
-        )
+        try:
+            sp_manager = SelfPlayManager(
+                model_cfg,
+                sp_cfg,
+                opponent_device=sp_cfg.device,
+                log_intersteps=log_intersteps,
+                config_map=cfg_map,
+            )
+        except TypeError:
+            # Backwards compatibility for simplified stubs in unit tests.
+            sp_manager = SelfPlayManager(model_cfg, opponent_device=sp_cfg.device)
 
     per_device_train_bs = max(1, int(rlhf_cfg["num_generations"]))
 
@@ -190,6 +208,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         pretty_print=debug_full_logs,
         write_text_log=debug_full_logs,
     )
+    metrics_path = output_path / "metrics.jsonl"
     scoreboard = ScoreBoard(out_dir=output_dir)
     failure_logger = FailureLogger(out_dir=output_dir)
 
@@ -198,103 +217,80 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     class PromptDataset:
         def __init__(self, rows) -> None:
             self.rows = rows
-            # Pre-render chat prompts to avoid repeated template work each step.
-            sys_msg = {
-                "role": "system",
-                "content": (
-                    "You are a careful engineer.\n"
-                    "You may think in a private scratchpad enclosed by <think>...</think>.\n"
-                    "Then provide the minimal correct solution.\n"
-                    "If coding helps, include ONE final Python code block implementing the solution.\n"
-                    "Terminate with exactly one of the following lines and STOP:\n"
-                    "  Final answer: <short text>\n"
-                    "  {\"final_answer\": \"<short text>\"}"
-                ),
-            }
-            self._rendered = []
             thinking_cfg_local = cfg_map.get("thinking", {}) or {}
-            want_template_thinking = bool(thinking_cfg_local.get("enabled", False))
-            template_thinking_supported: Optional[bool] = None
-            logged_status = False
+            self._policy_thinking = bool(thinking_cfg_local.get("policy_enable_thinking", False))
+            self._opponent_thinking = bool(thinking_cfg_local.get("opponent_enable_thinking", False))
+            self._policy_prompts: List[str] = []
+            self._opponent_prompts: List[str] = []
+
+            def _render(messages: List[Dict[str, str]], allow_thinking: bool, tag: str) -> str:
+                kwargs = {"tokenize": False, "add_generation_prompt": True}
+                if allow_thinking:
+                    kwargs["enable_thinking"] = True
+                try:
+                    return tokenizer.apply_chat_template(messages, **kwargs)
+                except TypeError:
+                    if allow_thinking:
+                        print(f"[Thinking] chat_template.enable_thinking unsupported for {tag}; falling back")
+                    kwargs.pop("enable_thinking", None)
+                    return tokenizer.apply_chat_template(messages, **kwargs)
+
+            policy_system_prompt = format_system_prompt(self._policy_thinking)
+            opponent_system_prompt = format_system_prompt(self._opponent_thinking)
 
             for ex in self.rows:
-                msgs = [sys_msg, {"role": "user", "content": ex.prompt}]
-                if want_template_thinking:
-                    if template_thinking_supported is None:
-                        try:
-                            rendered = tokenizer.apply_chat_template(
-                                msgs,
-                                tokenize=False,
-                                add_generation_prompt=True,
-                                enable_thinking=True,
-                            )
-                            template_thinking_supported = True
-                            if not logged_status:
-                                print("[Thinking] chat_template.enable_thinking=True (supported)")
-                                logged_status = True
-                        except TypeError:
-                            template_thinking_supported = False
-                            rendered = tokenizer.apply_chat_template(
-                                msgs,
-                                tokenize=False,
-                                add_generation_prompt=True,
-                            )
-                            if not logged_status:
-                                print(
-                                    "[Thinking] chat_template.enable_thinking not supported; continuing without it"
-                                )
-                                logged_status = True
-                    else:
-                        if template_thinking_supported:
-                            rendered = tokenizer.apply_chat_template(
-                                msgs,
-                                tokenize=False,
-                                add_generation_prompt=True,
-                                enable_thinking=True,
-                            )
-                        else:
-                            rendered = tokenizer.apply_chat_template(
-                                msgs,
-                                tokenize=False,
-                                add_generation_prompt=True,
-                            )
-                else:
-                    rendered = tokenizer.apply_chat_template(
-                        msgs,
-                        tokenize=False,
-                        add_generation_prompt=True,
-                    )
-                self._rendered.append(rendered)
+                policy_msgs = [
+                    {"role": "system", "content": policy_system_prompt},
+                    {"role": "user", "content": ex.prompt},
+                ]
+                opponent_msgs = [
+                    {"role": "system", "content": opponent_system_prompt},
+                    {"role": "user", "content": ex.prompt},
+                ]
+                self._policy_prompts.append(_render(policy_msgs, self._policy_thinking, "policy"))
+                self._opponent_prompts.append(_render(opponent_msgs, self._opponent_thinking, "opponent"))
 
         def __len__(self) -> int:
             return len(self.rows)
 
         def __getitem__(self, index: int) -> Dict[str, Any]:
             example = self.rows[index]
-            prompt = self._rendered[index]
+            prompt = self._policy_prompts[index]
             meta = {
                 "tests": example.tests,
                 "timeout_s": example.timeout_s,
                 "memory_mb": example.memory_mb,
                 "orig_prompt": example.prompt,
+                "opponent_prompt": self._opponent_prompts[index],
             }
+            func_name = infer_function_name(example.tests, example.prompt)
+            if func_name:
+                meta["func_name"] = func_name
             return {"prompt": prompt, "metadata": meta}
 
     train_dataset = PromptDataset(samples)
 
     def reward_fn(
-        *,
         prompts: List[str],
         completions: List[str],
-        completion_ids: List[List[int]],  # unused but required by TRL
+        completion_ids: List[List[int]] | None = None,
         metadata: List[Dict[str, Any]] | None = None,
         trainer_state=None,
         **_: Any,
     ) -> List[float]:
         nonlocal trainer_ref
-        del completion_ids
+        if completion_ids is not None:
+            _ = completion_ids
         state = trainer_state
         metadata = metadata or [{} for _ in completions]
+
+        def _normalize_step(value) -> Optional[int]:
+            if value is None:
+                return None
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
 
         step_id = getattr(state, "global_step", None)
         base_scores: List[float] = []
@@ -333,6 +329,16 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 if debug_full_logs:
                     payload["user_prompt"] = meta.get("orig_prompt", "")
                 gen_logger.log(payload)
+
+            metrics_record = {
+                "source": "policy",
+                "step": _normalize_step(step_id),
+                "passed": bool(policy_pass),
+                "score": float(score),
+                "func_name": meta.get("func_name"),
+                "retries": 0,
+            }
+            append_jsonl(metrics_path, metrics_record)
         # --- BEGIN interstep logging ---
         if cfg_map.get("log_intersteps"):
             step = getattr(state, "global_step", None)
@@ -350,7 +356,8 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
 
         if sp_cfg.enabled and sp_manager is not None:
             try:
-                opponent_outputs = sp_manager.generate_opponent(prompts, max_completion_len)
+                opponent_prompt_strings = [meta.get("opponent_prompt", prompt_text) for prompt_text, meta in zip(prompts, metadata)]
+                opponent_outputs = sp_manager.generate_opponent(opponent_prompt_strings, max_completion_len)
             except Exception as exc:
                 print(f"[Warning] Opponent provider failure: {exc}")
                 if trainer_ref is not None:
@@ -423,72 +430,109 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                             modes = assist_cfg.get("modes", ["hint", "critique"])
                             mode = modes[0] if modes else "hint"
                             tests_list = meta.get("tests", [])
-                            tests_section = ("\n\nTests to satisfy:\n" + "\n".join(tests_list)) if tests_list else ""
+
+                            assist_sections: List[str] = []
+                            assist_sections.append("Instruction: Implement the requested Python function exactly as specified.")
+                            user_orig = meta.get("orig_prompt", base_prompt)
+                            assist_sections.append(f"Problem:\n{user_orig}")
+                            if tests_list:
+                                assist_sections.append("Tests (must all pass):\n" + "\n".join(tests_list))
                             if mode == "critique" and completions[idx]:
-                                teacher_prompt = (
-                                    "You are a mentor helping a junior engineer fix their code. "
-                                    "Think privately inside <think>...</think> but output only ONE short hint to correct the errors.\n\n"
-                                    f"Problem:\n{base_prompt}\n\nFailed attempt:\n{completions[idx]}{tests_section}"
-                                )
-                            else:
-                                teacher_prompt = (
-                                    "You are a mentor guiding a junior engineer. "
-                                    "Think privately inside <think>...</think> but output only ONE short hint (no code) to help them solve the problem.\n\n"
-                                    f"Problem:\n{base_prompt}{tests_section}"
-                                )
+                                assist_sections.append("Failed attempt:\n" + completions[idx])
+                            assist_user_prompt = "\n\n".join(assist_sections)
 
-                            hint = sp_manager.teacher_hint([teacher_prompt], int(assist_cfg.get("max_hint_tokens", 256)))[0]
-                            hint_stripped = hint.strip()
-                            if hint_stripped.lower().startswith("final answer:"):
-                                hint = hint_stripped.split(":", 1)[1].lstrip()
-                            elif hint_stripped.startswith("{") and "final_answer" in hint_stripped:
-                                import re
-                                match = re.search(r'\{"final_answer"\s*:\s*"([^"]*)"\}', hint_stripped)
-                                if match:
-                                    hint = match.group(1)
+                            teacher_messages = build_assist_messages(assist_user_prompt)
+                            hint = sp_manager.teacher_hint([teacher_messages], int(assist_cfg.get("max_hint_tokens", 256)))[0]
+                            hint_clean = hint.strip()
 
-                            sys_instructions = (
-                                "You are a careful engineer.\n"
-                                "You may think in a private scratchpad enclosed by <think>...</think>.\n"
-                                "Then provide the minimal correct solution.\n"
-                                "If coding helps, include ONE final Python code block implementing the solution.\n"
-                                "Terminate with exactly one of the following lines and STOP:\n"
-                                "  Final answer: <short text>\n"
-                                "  {\"final_answer\": \"<short text>\"}"
-                            )
-                            user_prompt = meta.get("orig_prompt", base_prompt)
-                            hint_clean = (hint or "").strip()
-                            if not hint_clean:
-                                hint_clean = "Please solve the task."
-                            retry_messages = [
-                                {"role": "system", "content": sys_instructions},
-                                {"role": "user", "content": user_prompt},
-                                {"role": "assistant", "content": hint_clean},
-                            ]
-                            try:
-                                retry_prompt = tokenizer.apply_chat_template(
-                                    retry_messages,
-                                    tokenize=False,
-                                    add_generation_prompt=True,
-                                    enable_thinking=True,
+                            func_name = meta.get("func_name")
+                            max_gate_attempts = 2
+                            last_gate_error: str | None = None
+                            final_structured_retry: List[Dict[str, object]] | None = None
+                            retry_text = ""
+                            attempts_used = 0
+
+                            def _flatten_messages(messages: List[Dict[str, object]]) -> List[Dict[str, str]]:
+                                flat: List[Dict[str, str]] = []
+                                for msg in messages:
+                                    role = msg.get("role", "user")
+                                    content_items = msg.get("content", [])
+                                    if isinstance(content_items, list):
+                                        parts: List[str] = []
+                                        for item in content_items:
+                                            if isinstance(item, dict):
+                                                txt = item.get("text") or item.get("value")
+                                                if isinstance(txt, str):
+                                                    parts.append(txt)
+                                            elif isinstance(item, str):
+                                                parts.append(item)
+                                        content_text = "\n".join(parts)
+                                    else:
+                                        content_text = str(content_items)
+                                    flat.append({"role": str(role), "content": content_text})
+                                return flat
+
+                            for gate_attempt in range(max_gate_attempts):
+                                structured_retry_messages = build_retry_messages(
+                                    user_orig, hint_clean, allow_thinking=policy_enable_thinking
                                 )
-                            except TypeError:
-                                retry_prompt = tokenizer.apply_chat_template(
-                                    retry_messages,
-                                    tokenize=False,
-                                    add_generation_prompt=True,
+                                if gate_attempt > 0:
+                                    structured_retry_messages.append(
+                                        {
+                                            "role": "system",
+                                            "content": [{"type": "input_text", "text": CODE_GATE_SYSTEM_NUDGE}],
+                                        }
+                                    )
+
+                                retry_messages = _flatten_messages(structured_retry_messages)
+                                try:
+                                    kwargs_retry = {
+                                        "tokenize": False,
+                                        "add_generation_prompt": True,
+                                    }
+                                    if policy_enable_thinking:
+                                        kwargs_retry["enable_thinking"] = True
+                                    retry_prompt = tokenizer.apply_chat_template(retry_messages, **kwargs_retry)
+                                except TypeError:
+                                    retry_prompt = tokenizer.apply_chat_template(
+                                        retry_messages,
+                                        tokenize=False,
+                                        add_generation_prompt=True,
+                                    )
+                                enc = tokenizer(retry_prompt, return_tensors="pt").to(model.device)
+                                retry_temp = float(rlhf_cfg.get("retry_temperature", rlhf_cfg["temperature"]))
+                                gen_ids = model.generate(
+                                    **enc,
+                                    max_new_tokens=int(rlhf_cfg["max_completion_length"]),
+                                    do_sample=True,
+                                    temperature=retry_temp,
+                                    top_p=float(rlhf_cfg["top_p"]),
+                                    use_cache=True,
                                 )
-                            enc = tokenizer(retry_prompt, return_tensors="pt").to(model.device)
-                            retry_temp = float(rlhf_cfg.get("retry_temperature", rlhf_cfg["temperature"]))
-                            gen_ids = model.generate(
-                                **enc,
-                                max_new_tokens=int(rlhf_cfg["max_completion_length"]),
-                                do_sample=True,
-                                temperature=retry_temp,
-                                top_p=float(rlhf_cfg["top_p"]),
-                                use_cache=True,
-                            )
-                            retry_text = tokenizer.decode(gen_ids[0], skip_special_tokens=True)
+                                retry_text = tokenizer.decode(gen_ids[0], skip_special_tokens=True)
+                                attempts_used = gate_attempt + 1
+
+                                try:
+                                    code_block = extract_last_python_block(retry_text)
+                                    if not code_block:
+                                        raise CodeGateError("Missing Python code block in assist output.")
+                                    if func_name and not has_function_signature(code_block, func_name):
+                                        raise CodeGateError(f"Function '{func_name}' not found in code block.")
+                                except CodeGateError as gate_exc:
+                                    last_gate_error = str(gate_exc)
+                                    final_structured_retry = structured_retry_messages
+                                    if gate_attempt + 1 >= max_gate_attempts:
+                                        break
+                                    continue
+                                else:
+                                    last_gate_error = None
+                                    final_structured_retry = structured_retry_messages
+                                    break
+
+                            if final_structured_retry is None:
+                                final_structured_retry = structured_retry_messages
+
+                            retries_used = attempts_used - 1 if attempts_used > 0 else 0
 
                             retry_score, retry_stats = blended_reward(
                                 retry_text,
@@ -526,37 +570,50 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                                 }
                                 if debug_full_logs:
                                     event["retry_prompt"] = retry_prompt
-                                    event["assist_messages"] = retry_messages
+                                    event["assist_request_messages"] = teacher_messages
+                                    event["assist_user_prompt"] = assist_user_prompt
+                                    event["retry_messages"] = final_structured_retry
                                     event["hint_mode"] = mode
+                                    if last_gate_error:
+                                        event["codegate_error"] = last_gate_error
                                 if log_executor_output and "exec_traces" in retry_stats:
                                     event["exec_traces"] = retry_stats["exec_traces"]
                                 gen_logger.log(event)
+
+                            metrics_record = {
+                                "source": "assist",
+                                "step": _normalize_step(step_id),
+                                "passed": bool(policy_pass_flags[idx]),
+                                "score": float(retry_score),
+                                "func_name": meta.get("func_name"),
+                                "retries": int(max(0, retries_used)),
+                            }
+                            append_jsonl(metrics_path, metrics_record)
                         except Exception as assist_exc:
                             print(f"[Assist] warning: {assist_exc}")
 
-            if gen_logger is not None:
-                ts = time.time()
-                for (
-                    prompt_text,
-                    opp_completion,
-                    meta,
-                    base_score,
-                    sp_score,
-                    combined_score,
-                    opp_pass,
-                    opp_stats,
-                ) in zip(
-                    prompts,
-                    opponent_outputs,
-                    metadata,
-                    base_scores,
-                    sp_scores,
-                    combined,
-                    opponent_pass_flags,
-                    opponent_trace_stats,
-                ):
+            for (
+                prompt_text,
+                opp_completion,
+                meta,
+                base_score,
+                sp_score,
+                combined_score,
+                opp_pass,
+                opp_stats,
+            ) in zip(
+                prompts,
+                opponent_outputs,
+                metadata,
+                base_scores,
+                sp_scores,
+                combined,
+                opponent_pass_flags,
+                opponent_trace_stats,
+            ):
+                if gen_logger is not None:
                     payload = {
-                        "ts": ts,
+                        "ts": time.time(),
                         "source": "opponent",
                         "step": step_id,
                         "prompt": prompt_text,
@@ -572,6 +629,16 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     if log_executor_output and "exec_traces" in opp_stats:
                         payload["exec_traces"] = opp_stats["exec_traces"]
                     gen_logger.log(payload)
+
+                metrics_record = {
+                    "source": "opponent",
+                    "step": _normalize_step(step_id),
+                    "passed": bool(opp_pass),
+                    "score": float(sp_score),
+                    "func_name": meta.get("func_name"),
+                    "retries": 0,
+                }
+                append_jsonl(metrics_path, metrics_record)
 
             if scoreboard is not None and policy_pass_flags:
                 try:
@@ -618,7 +685,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         trainer_kwargs["tokenizer"] = tokenizer
     else:
         trainer_kwargs["processing_class"] = tokenizer
-    trainer = GRPOTrainerWithStop(**trainer_kwargs)
+    trainer = GRPOTrainer(**trainer_kwargs)
     trainer.gen_logger = gen_logger
     trainer.scoreboard = scoreboard
     trainer.log_options = {
@@ -636,12 +703,13 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         sp_manager.gen_logger = gen_logger
         sp_manager.trainer = trainer
         trainer.sp_manager = sp_manager
-    trainer.add_callback(TrainingMetricsCallback(out_dir=getattr(grpo_cfg, "output_dir", None)))
-    if log_intersteps:
-        class _StageLoggerCallback(TrainerCallback):
-            def on_step_begin(self, args, state, control, **kwargs):  # type: ignore[override]
-                print(f"[Stage] on_step_begin | step={state.global_step} epoch={state.epoch}")
-                return control
+    if hasattr(trainer, "add_callback"):
+        trainer.add_callback(TrainingMetricsCallback(out_dir=getattr(grpo_cfg, "output_dir", None)))
+        if log_intersteps and hasattr(trainer, "add_callback"):
+            class _StageLoggerCallback(TrainerCallback):
+                def on_step_begin(self, args, state, control, **kwargs):  # type: ignore[override]
+                    print(f"[Stage] on_step_begin | step={state.global_step} epoch={state.epoch}")
+                    return control
 
             def on_step_end(self, args, state, control, **kwargs):  # type: ignore[override]
                 last = state.log_history[-1] if state.log_history else None
@@ -656,9 +724,9 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     print(f"[Stage] on_log        | step={state.global_step} logs={logs}")
                 return control
 
-        trainer.add_callback(_StageLoggerCallback())
+            trainer.add_callback(_StageLoggerCallback())
 
-        original_generate = trainer.model.generate
+            original_generate = trainer.model.generate
 
         def _logged_generate(*gen_args, **gen_kwargs):
             step = getattr(trainer.state, 'global_step', None)
@@ -668,7 +736,8 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             return output
 
         trainer.model.generate = _logged_generate  # type: ignore[assignment]
-    trainer.add_callback(_EnsureLmHeadDtype())
+    if hasattr(trainer, "add_callback"):
+        trainer.add_callback(_EnsureLmHeadDtype())
     return trainer
 
 
@@ -695,8 +764,12 @@ def main(config_path: str, *, max_steps: int | None = None) -> None:
                 pass
 
 
-if __name__ == "__main__":  # pragma: no cover
-    import sys
+    if __name__ == "__main__":  # pragma: no cover
+        import sys
 
-    path = sys.argv[1] if len(sys.argv) > 1 else "azr/config.json"
-    main(path)
+        path = sys.argv[1] if len(sys.argv) > 1 else "azr/config.json"
+        main(path)
+
+
+# Backwards compatibility for tests expecting this symbol.
+GRPOTrainer = GRPOTrainerWithStop
