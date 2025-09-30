@@ -151,15 +151,15 @@ class SelfPlayManager:
         torch.cuda.synchronize()
 
     def generate_opponent(self, prompts: List[str], max_tokens: int) -> List[str]:
-        thinking_cfg = self.config_map.get("thinking", {}) or {}
-        opp_extra = int(thinking_cfg.get("opponent_budget_tokens", 0)) or 0
-        max_tokens_with_extra = max_tokens + opp_extra
+        """Generate opponent completions using the caller-provided token budget."""
+
+        budget = max(1, int(max_tokens))
         if self.remote_provider is not None:
             if self.log_intersteps:
                 print(f"[Stage] Remote opponent request start | prompts={len(prompts)}")
             while True:
                 try:
-                    completions = asyncio.run(self.remote_provider.agenerate(prompts, max_tokens_with_extra))
+                    completions = asyncio.run(self.remote_provider.agenerate(prompts, budget))
                     break
                 except RuntimeError as exc:
                     msg = str(exc)
@@ -213,7 +213,7 @@ class SelfPlayManager:
                 }
                 out = self.opponent.generate(
                     **inputs,
-                    max_new_tokens=max_tokens_with_extra,
+                    max_new_tokens=budget,
                     do_sample=True,
                     temperature=0.7,
                     top_p=0.95,

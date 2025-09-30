@@ -107,8 +107,12 @@ class OpenAIResponsesProvider:
             "max_output_tokens": max_tokens,
         }
         if self.extra_body:
-            # Filter out unsupported keys (e.g., legacy "reasoning") and allow safe overrides like stop sequences.
-            safe_extra = {k: v for k, v in self.extra_body.items() if k not in {"reasoning"}}
+            # Filter out unsupported keys for the Responses endpoint (e.g., legacy "reasoning" or "stop").
+            safe_extra = {
+                k: v
+                for k, v in self.extra_body.items()
+                if k not in {"reasoning", "stop"}
+            }
             payload.update(safe_extra)
 
         headers = {

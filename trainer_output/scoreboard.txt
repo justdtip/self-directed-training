@@ -1,12 +1,12 @@
-Policy only: 13
+Policy only: 6
 Opponent only: 0
 Both: 0
-Neither: 51
+Neither: 26
 
-Total: 64
-Decisive (W+L): 13
-Wins (policy_only): 13
+Total: 32
+Decisive (W+L): 6
+Wins (policy_only): 6
 Losses (opponent_only): 0
-Ties (both+neither): 51
+Ties (both+neither): 26
 Win-rate (decisive): 1.0000
-Wilson 95% CI: [0.7719, 1.0000]  z=1.96
+Wilson 95% CI: [0.6097, 1.0000]  z=1.96

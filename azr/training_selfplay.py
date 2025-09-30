@@ -27,6 +27,7 @@ from .prompts_assist import (
     CODE_GATE_SYSTEM_NUDGE,
     build_assist_messages,
     build_retry_messages,
+    format_system_prompt,
 )
 from .codegate import (
     CodeGateError,
@@ -130,13 +131,13 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     model = setup_model(model_cfg, bf16=bf16_flag)
 
     max_prompt_len = int(rlhf_cfg["max_prompt_length"])
-    max_completion_len = int(rlhf_cfg["max_completion_length"])
+    base_completion_len = int(rlhf_cfg["max_completion_length"])
     thinking_cfg = cfg_map.get("thinking", {}) or {}
     policy_extra = int(thinking_cfg.get("policy_budget_tokens", 0))
-    if policy_extra:
-        max_completion_len += policy_extra
-        rlhf_cfg["max_completion_length"] = max_completion_len
+    max_completion_len = base_completion_len + policy_extra
+    rlhf_cfg["max_completion_length"] = max_completion_len
     opponent_extra = int(thinking_cfg.get("opponent_budget_tokens", 0))
+    opponent_completion_len = base_completion_len + opponent_extra
     policy_enable_thinking = bool(thinking_cfg.get("policy_enable_thinking", False))
     opponent_enable_thinking = bool(thinking_cfg.get("opponent_enable_thinking", False))
 
@@ -453,8 +454,35 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
 
         if sp_cfg.enabled and sp_manager is not None:
             try:
-                opponent_prompt_strings = [meta.get("opponent_prompt", prompt_text) for prompt_text, meta in zip(prompts, metadata)]
-                opponent_outputs = sp_manager.generate_opponent(opponent_prompt_strings, max_completion_len)
+                opp_enable_thinking = bool(opponent_enable_thinking)
+                opponent_prompt_strings: List[str] = []
+                for prompt_text, meta in zip(prompts, metadata):
+                    user_orig = meta.get("orig_prompt") or ""
+                    user_prompt = meta.get("opponent_prompt", user_orig)
+                    system_text = format_system_prompt(allow_thinking=opp_enable_thinking)
+                    message_bundle = [
+                        {"role": "system", "content": system_text},
+                        {"role": "user", "content": user_prompt},
+                    ]
+                    try:
+                        rendered = tokenizer.apply_chat_template(
+                            message_bundle,
+                            tokenize=False,
+                            add_generation_prompt=True,
+                            enable_thinking=opp_enable_thinking,
+                        )
+                    except TypeError:
+                        rendered = tokenizer.apply_chat_template(
+                            message_bundle,
+                            tokenize=False,
+                            add_generation_prompt=True,
+                        )
+                    opponent_prompt_strings.append(rendered)
+
+                opponent_outputs = sp_manager.generate_opponent(
+                    opponent_prompt_strings,
+                    opponent_completion_len,
+                )
             except Exception as exc:
                 print(f"[Warning] Opponent provider failure: {exc}")
                 if trainer_ref is not None:
