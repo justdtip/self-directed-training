@@ -28,8 +28,9 @@
     "tag_open": "<think>",
     "tag_close": "</think>",
     "strip_for_reward": true,
-    "policy_budget_tokens": 768,
-    "opponent_budget_tokens": 768,
+    "policy_budget_tokens": 2048,
+    "opponent_budget_tokens": 2048,
+    "opponent_budget_note": "Ensure rlhf.max_completion_length + opponent_budget_tokens covers thinking + answer",
     "teacher_budget_tokens": 4096,
     "policy_enable_thinking": true,
     "opponent_enable_thinking": true

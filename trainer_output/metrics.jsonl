@@ -2005,3 +2005,314 @@
 {"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "four_sum_count_zero", "retries": 0, "reason": "format_error"}
 {"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0, "reason": "format_error"}
 {"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "memory_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "longest_valid_parentheses", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "closest_divisors", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "closest_divisors", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "closest_divisors", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "closest_divisors", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "LRUCache2", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "minimal_period", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "minimal_period", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "minimal_period", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "minimal_period", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "four_sum_count_zero", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "closest_divisors", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "closest_divisors", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "closest_divisors", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "closest_divisors", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "minimal_period", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "minimal_period", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "minimal_period", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "minimal_period", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "four_sum_count_zero", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0, "reason": "format_error"}
+{"ts": 1759191052.2427568, "step": 1, "loss": 0.0908, "grad_norm": 0.0, "learning_rate": 0.0, "num_tokens": 39895.0, "completions/mean_length": 1056.96875, "completions/min_length": 353.0, "completions/max_length": 1792.0, "completions/clipped_ratio": 0.0625, "completions/mean_terminated_length": 1007.9667358398438, "completions/min_terminated_length": 353.0, "completions/max_terminated_length": 1749.0, "rewards/reward_fn/mean": 0.29666668176651, "rewards/reward_fn/std": 0.3452410399913788, "reward": 0.29666668176651, "reward_std": 0.2380291074514389, "frac_reward_zero_std": 0.0, "entropy": 0.4245070740580559, "clip_ratio/low_mean": 0.0, "clip_ratio/low_min": 0.0, "clip_ratio/high_mean": 0.0, "clip_ratio/high_max": 0.0, "clip_ratio/region_mean": 0.0, "epoch": 0.003968253968253968}
+{"source": "policy", "step": null, "passed": false, "score": 0.0, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": null, "passed": false, "score": 0.5, "func_name": null, "retries": 0, "reason": "no_tests"}
+{"source": "policy", "step": null, "passed": false, "score": 0.0, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": null, "passed": false, "score": 0.5, "func_name": null, "retries": 0, "reason": "no_tests"}
+{"source": "policy", "step": null, "passed": false, "score": 0.0, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": null, "passed": false, "score": 0.5, "func_name": null, "retries": 0, "reason": "no_tests"}
+{"source": "policy", "step": null, "passed": false, "score": 0.0, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": null, "passed": false, "score": 0.5, "func_name": null, "retries": 0, "reason": "no_tests"}
+{"source": "policy", "step": null, "passed": false, "score": 0.0, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": null, "passed": false, "score": 0.5, "func_name": null, "retries": 0, "reason": "no_tests"}
+{"source": "policy", "step": null, "passed": false, "score": 0.0, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": null, "passed": false, "score": 0.5, "func_name": null, "retries": 0, "reason": "no_tests"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "memory_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "longest_valid_parentheses", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "closest_divisors", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "closest_divisors", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "closest_divisors", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "closest_divisors", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "LRUCache2", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "minimal_period", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "minimal_period", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "minimal_period", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "minimal_period", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "four_sum_count_zero", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "closest_divisors", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "closest_divisors", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "closest_divisors", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "closest_divisors", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "minimal_period", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "minimal_period", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "minimal_period", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.6666666666666666, "func_name": "minimal_period", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 0.3333333333333333, "func_name": "four_sum_count_zero", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 0, "passed": false, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0, "reason": "format_error"}
+{"ts": 1759194806.2724519, "step": 1, "loss": 0.1151, "grad_norm": 0.0, "learning_rate": 0.0, "num_tokens": 39895.0, "completions/mean_length": 1056.96875, "completions/min_length": 353.0, "completions/max_length": 1792.0, "completions/clipped_ratio": 0.0625, "completions/mean_terminated_length": 1007.9667358398438, "completions/min_terminated_length": 353.0, "completions/max_terminated_length": 1749.0, "rewards/reward_fn/mean": 0.30291667580604553, "rewards/reward_fn/std": 0.34173890948295593, "reward": 0.30291667580604553, "reward_std": 0.23233731091022491, "frac_reward_zero_std": 0.0, "entropy": 0.4245070740580559, "clip_ratio/low_mean": 0.0, "clip_ratio/low_min": 0.0, "clip_ratio/high_mean": 0.0, "clip_ratio/high_max": 0.0, "clip_ratio/region_mean": 0.0, "epoch": 0.003968253968253968}
+{"source": "policy", "step": 1, "passed": false, "score": 0.05, "func_name": "min_adjacent_swaps_grouping_letters", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.05, "func_name": "min_adjacent_swaps_grouping_letters", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.05, "func_name": "min_adjacent_swaps_grouping_letters", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "min_adjacent_swaps_grouping_letters", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "kth_order_statistic_pst", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "kth_order_statistic_pst", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "kth_order_statistic_pst", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.05, "func_name": "kth_order_statistic_pst", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 1, "passed": true, "score": 1.0, "func_name": "count_primes_upto", "retries": 0}
+{"source": "policy", "step": 1, "passed": true, "score": 1.0, "func_name": "count_primes_upto", "retries": 0}
+{"source": "policy", "step": 1, "passed": true, "score": 1.0, "func_name": "count_primes_upto", "retries": 0}
+{"source": "policy", "step": 1, "passed": true, "score": 1.0, "func_name": "count_primes_upto", "retries": 0}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "count_subarrays_with_median", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "count_subarrays_with_median", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.05, "func_name": "count_subarrays_with_median", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.05, "func_name": "count_subarrays_with_median", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "minimum_time_difference_circular", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "minimum_time_difference_circular", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "minimum_time_difference_circular", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "minimum_time_difference_circular", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "ecdsa_sign_verify", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": true, "score": 1.0, "func_name": "ecdsa_sign_verify", "retries": 0}
+{"source": "policy", "step": 1, "passed": false, "score": 0.05, "func_name": "ecdsa_sign_verify", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 1, "passed": true, "score": 1.0, "func_name": "ecdsa_sign_verify", "retries": 0}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "max_envelopes", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "max_envelopes", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": true, "score": 1.0, "func_name": "max_envelopes", "retries": 0}
+{"source": "policy", "step": 1, "passed": false, "score": 0.05, "func_name": "max_envelopes", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "hopcroft_karp", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.05, "func_name": "hopcroft_karp", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.05, "func_name": "hopcroft_karp", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 1, "passed": false, "score": 0.0, "func_name": "hopcroft_karp", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "min_adjacent_swaps_grouping_letters", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "min_adjacent_swaps_grouping_letters", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "min_adjacent_swaps_grouping_letters", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "min_adjacent_swaps_grouping_letters", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "kth_order_statistic_pst", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "kth_order_statistic_pst", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "kth_order_statistic_pst", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "kth_order_statistic_pst", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 1.0, "func_name": "count_primes_upto", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 1.0, "func_name": "count_primes_upto", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 1.0, "func_name": "count_primes_upto", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 1.0, "func_name": "count_primes_upto", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "count_subarrays_with_median", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "count_subarrays_with_median", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "count_subarrays_with_median", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "count_subarrays_with_median", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "minimum_time_difference_circular", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "minimum_time_difference_circular", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "minimum_time_difference_circular", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.3333333333333333, "func_name": "minimum_time_difference_circular", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "ecdsa_sign_verify", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 1.0, "func_name": "ecdsa_sign_verify", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "ecdsa_sign_verify", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 1.0, "func_name": "ecdsa_sign_verify", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "max_envelopes", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "max_envelopes", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 1.0, "func_name": "max_envelopes", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "max_envelopes", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "hopcroft_karp", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "hopcroft_karp", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.6666666666666666, "func_name": "hopcroft_karp", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 1, "passed": false, "score": 0.3333333333333333, "func_name": "hopcroft_karp", "retries": 0, "reason": "format_error"}
+{"ts": 1759195276.8067098, "step": 2, "loss": 0.048, "grad_norm": 0.0, "learning_rate": 1e-05, "num_tokens": 82574.0, "completions/mean_length": 1140.46875, "completions/min_length": 545.0, "completions/max_length": 1792.0, "completions/clipped_ratio": 0.09375, "completions/mean_terminated_length": 1073.0689697265625, "completions/min_terminated_length": 545.0, "completions/max_terminated_length": 1702.0, "rewards/reward_fn/mean": 0.33125001192092896, "rewards/reward_fn/std": 0.36051908135414124, "reward": 0.33125001192092896, "reward_std": 0.13286733627319336, "frac_reward_zero_std": 0.125, "entropy": 0.4530133716762066, "clip_ratio/low_mean": 0.0, "clip_ratio/low_min": 0.0, "clip_ratio/high_mean": 0.0, "clip_ratio/high_max": 0.0, "clip_ratio/region_mean": 0.0, "epoch": 0.007936507936507936}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "sprague_grundy_graph_game", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "sprague_grundy_graph_game", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "sprague_grundy_graph_game", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.0, "func_name": "sprague_grundy_graph_game", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 2, "passed": true, "score": 1.0, "func_name": "longest_palindromic_subsequence", "retries": 0}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "longest_palindromic_subsequence", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "longest_palindromic_subsequence", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "longest_palindromic_subsequence", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": null, "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": null, "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.0, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": null, "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "expected_rolls_to_get_sequence", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "expected_rolls_to_get_sequence", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.0, "func_name": "expected_rolls_to_get_sequence", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 2, "passed": true, "score": 1.0, "func_name": "expected_rolls_to_get_sequence", "retries": 0}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "min_falling_path_sum_no_adjacent_col", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "min_falling_path_sum_no_adjacent_col", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.0, "func_name": "min_falling_path_sum_no_adjacent_col", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "min_falling_path_sum_no_adjacent_col", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": true, "score": 1.0, "func_name": "brinell_hardness", "retries": 0}
+{"source": "policy", "step": 2, "passed": true, "score": 1.0, "func_name": "brinell_hardness", "retries": 0}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "brinell_hardness", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": true, "score": 1.0, "func_name": "brinell_hardness", "retries": 0}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "min_cost_flow_simple", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.0, "func_name": "min_cost_flow_simple", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.0, "func_name": "min_cost_flow_simple", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.0, "func_name": "min_cost_flow_simple", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.0, "func_name": "unification_first_order", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "unification_first_order", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.0, "func_name": "unification_first_order", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 2, "passed": false, "score": 0.05, "func_name": "unification_first_order", "retries": 0, "reason": "assertion_failed"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "sprague_grundy_graph_game", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "sprague_grundy_graph_game", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "sprague_grundy_graph_game", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "sprague_grundy_graph_game", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 1.0, "func_name": "longest_palindromic_subsequence", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "longest_palindromic_subsequence", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "longest_palindromic_subsequence", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "longest_palindromic_subsequence", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "expected_rolls_to_get_sequence", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "expected_rolls_to_get_sequence", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "expected_rolls_to_get_sequence", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 1.0, "func_name": "expected_rolls_to_get_sequence", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "min_falling_path_sum_no_adjacent_col", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "min_falling_path_sum_no_adjacent_col", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "min_falling_path_sum_no_adjacent_col", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "min_falling_path_sum_no_adjacent_col", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 1.0, "func_name": "brinell_hardness", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 1.0, "func_name": "brinell_hardness", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "brinell_hardness", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 1.0, "func_name": "brinell_hardness", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "min_cost_flow_simple", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "min_cost_flow_simple", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.3333333333333333, "func_name": "min_cost_flow_simple", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "min_cost_flow_simple", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "unification_first_order", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "unification_first_order", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "unification_first_order", "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": 2, "passed": false, "score": 0.6666666666666666, "func_name": "unification_first_order", "retries": 0, "reason": "format_error"}
+{"ts": 1759195723.4009037, "step": 3, "loss": 0.0879, "grad_norm": 0.0, "learning_rate": 5e-06, "num_tokens": 119137.0, "completions/mean_length": 950.71875, "completions/min_length": 170.0, "completions/max_length": 1792.0, "completions/clipped_ratio": 0.0625, "completions/mean_terminated_length": 894.6333618164062, "completions/min_terminated_length": 170.0, "completions/max_terminated_length": 1561.0, "rewards/reward_fn/mean": 0.2891666293144226, "rewards/reward_fn/std": 0.31169211864471436, "reward": 0.2891666293144226, "reward_std": 0.1718006730079651, "frac_reward_zero_std": 0.0, "entropy": 0.4285798817873001, "clip_ratio/low_mean": 0.0, "clip_ratio/low_min": 0.0, "clip_ratio/high_mean": 0.0, "clip_ratio/high_max": 0.0, "clip_ratio/region_mean": 0.0, "epoch": 0.011904761904761904}
+{"ts": 1759195724.6037397, "step": 3, "train_runtime": 1453.3869, "train_samples_per_second": 0.066, "train_steps_per_second": 0.002, "total_flos": 0.0, "train_loss": 0.0836600586771965, "epoch": 0.011904761904761904}
+{"source": "policy", "step": null, "passed": false, "score": 0.0, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": null, "passed": false, "score": 0.5, "func_name": null, "retries": 0, "reason": "no_tests"}
+{"source": "policy", "step": null, "passed": false, "score": 0.0, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": null, "passed": false, "score": 0.5, "func_name": null, "retries": 0, "reason": "no_tests"}
+{"source": "policy", "step": null, "passed": false, "score": 0.0, "func_name": null, "retries": 0, "reason": "format_error"}
+{"source": "opponent", "step": null, "passed": false, "score": 0.5, "func_name": null, "retries": 0, "reason": "no_tests"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "memory_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "longest_valid_parentheses", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "closest_divisors", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "closest_divisors", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "closest_divisors", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "closest_divisors", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "LRUCache2", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "minimal_period", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "minimal_period", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "minimal_period", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "minimal_period", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "four_sum_count_zero", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}

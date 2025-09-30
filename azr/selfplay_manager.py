@@ -151,7 +151,20 @@ class SelfPlayManager:
         torch.cuda.synchronize()
 
     def generate_opponent(self, prompts: List[str], max_tokens: int) -> List[str]:
-        """Generate opponent completions using the caller-provided token budget."""
+        """
+        Generate opponent completions.
+
+        Parameters
+        ----------
+        prompts:
+            Chat-formatted prompts (one per example) to feed the opponent model.
+        max_tokens:
+            Generation budget that MUST already include any extra opponent allowances,
+            such as ``thinking`` budgets. For example, if the base completion length is
+            384 and ``opponent_budget_tokens`` is 768, call this method with ``384 + 768``.
+            This helper does **not** augment the value automatically; callers must extend
+            it up front to avoid truncated outputs.
+        """
 
         budget = max(1, int(max_tokens))
         if self.remote_provider is not None:

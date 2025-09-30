@@ -10,6 +10,7 @@ from transformers import set_seed
 from transformers.trainer_callback import TrainerCallback
 import torch
 import random
+import re
 from trl.trainer.grpo_trainer import GRPOConfig
 
 from .config import AzrModelCfg, AzrSelfPlayCfg, AzrTrainingCfg, load_config
@@ -223,7 +224,8 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             self.rows = rows
             system_prompt_text = ASSIST_SYSTEM_STRICT
             sys_msg = {"role": "system", "content": system_prompt_text}
-            self._rendered = []
+            self._rendered: List[str] = []
+            self._opponent_prompts: List[str] = []
             thinking_cfg_local = cfg_map.get("thinking", {}) or {}
             if not PromptDataset._thinking_flags_logged:
                 print(
@@ -280,6 +282,20 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     rendered = tokenizer.apply_chat_template(msgs, **kwargs)
                 self._rendered.append(rendered)
 
+                opp_msgs = [
+                    {"role": "system", "content": format_system_prompt(allow_thinking=opponent_enable_thinking)},
+                    {"role": "user", "content": ex.prompt},
+                ]
+                opp_kwargs = {"tokenize": False, "add_generation_prompt": True}
+                if opponent_enable_thinking:
+                    opp_kwargs["enable_thinking"] = True
+                try:
+                    opponent_prompt = tokenizer.apply_chat_template(opp_msgs, **opp_kwargs)
+                except TypeError:
+                    opp_kwargs.pop("enable_thinking", None)
+                    opponent_prompt = tokenizer.apply_chat_template(opp_msgs, **opp_kwargs)
+                self._opponent_prompts.append(opponent_prompt)
+
         def __len__(self) -> int:
             return len(self.rows)
 
@@ -291,6 +307,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                 "timeout_s": example.timeout_s,
                 "memory_mb": example.memory_mb,
                 "orig_prompt": example.prompt,
+                "opponent_prompt": self._opponent_prompts[index],
             }
             func_name = infer_function_name(example.tests, example.prompt)
             if func_name:
@@ -797,10 +814,31 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
 
             if scoreboard is not None and policy_pass_flags:
                 try:
+                    expected = len(prompts)
+
+                    if len(policy_pass_flags) != expected:
+                        print(
+                            "[Scoreboard] WARNING: policy flag length mismatch "
+                            f"policy={len(policy_pass_flags)} expected={expected}"
+                        )
+                        if len(policy_pass_flags) < expected:
+                            policy_pass_flags.extend([False] * (expected - len(policy_pass_flags)))
+                        else:
+                            del policy_pass_flags[expected:]
+
+                    if len(opponent_pass_flags) != expected:
+                        print(
+                            "[Scoreboard] WARNING: opponent flag length mismatch "
+                            f"opponent={len(opponent_pass_flags)} expected={expected}"
+                        )
+                        if len(opponent_pass_flags) < expected:
+                            opponent_pass_flags.extend([False] * (expected - len(opponent_pass_flags)))
+                        else:
+                            del opponent_pass_flags[expected:]
                     scoreboard.update_batch(policy_pass_flags, opponent_pass_flags)
                     scoreboard.write()
-                except Exception:
-                    pass
+                except Exception as sb_exc:
+                    print(f"[Scoreboard] ERROR during update: {sb_exc}")
 
             if sp_cfg.update_every > 0:
                 sp_manager.call_counter += 1
@@ -821,11 +859,22 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             print(f"[Stage] reward_fn return base score={base_scores[0]:.4f}")
         if scoreboard is not None and policy_pass_flags and not (sp_cfg.enabled and sp_manager is not None):
             try:
-                opponent_flags = [False] * len(policy_pass_flags)
+                expected = len(prompts)
+                if len(policy_pass_flags) != expected:
+                    print(
+                        "[Scoreboard] WARNING: policy flag length mismatch "
+                        f"policy={len(policy_pass_flags)} expected={expected}"
+                    )
+                    if len(policy_pass_flags) < expected:
+                        policy_pass_flags.extend([False] * (expected - len(policy_pass_flags)))
+                    else:
+                        del policy_pass_flags[expected:]
+
+                opponent_flags = [False] * expected
                 scoreboard.update_batch(policy_pass_flags, opponent_flags)
                 scoreboard.write()
-            except Exception:
-                pass
+            except Exception as sb_exc:
+                print(f"[Scoreboard] ERROR during solo update: {sb_exc}")
 
         return base_scores
 
@@ -915,8 +964,8 @@ def main(config_path: str, *, max_steps: int | None = None) -> None:
         if hasattr(trainer, "scoreboard"):
             try:
                 trainer.scoreboard.write()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Scoreboard] final write failed: {e}")
 
 
     if __name__ == "__main__":  # pragma: no cover
