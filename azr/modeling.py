@@ -7,7 +7,12 @@ import torch
 
 from .config import AzrModelCfg
 from .utils import console
-from .adapters import attach_ia3_gates
+from .adapters import (
+    attach_attention_logit_gates,
+    attach_ffn_gates,
+    attach_ia3_gates,
+    attach_per_layer_head_gates,
+)
 
 
 def load_tokenizer(model_id: str):
@@ -75,10 +80,58 @@ def setup_model(
     if bf16:
         model = model.to(dtype=torch.bfloat16)
 
+    trainable_markers: list[str] = ["lora"]
+
     if ia3_cfg and ia3_cfg.get("enabled"):
-        attach_ia3_gates(model, float(ia3_cfg.get("init_value", 1.0)))
-        for name, param in model.named_parameters():
-            trainable = ("lora" in name) or ("ia3_gate" in name)
-            param.requires_grad = trainable
+        init_value = float(ia3_cfg.get("init_value", 1.0))
+        attach_ia3_gates(model, init_value)
+        trainable_markers.append("ia3_gate")
+
+        if ia3_cfg.get("per_layer_head_gates"):
+            num_heads = getattr(model.config, "num_attention_heads", None) or getattr(
+                model.config, "num_heads", None
+            )
+            kv_heads = getattr(model.config, "num_key_value_heads", None)
+            if num_heads:
+                attach_per_layer_head_gates(
+                    model,
+                    int(num_heads),
+                    init_value,
+                    int(kv_heads) if kv_heads else None,
+                )
+                trainable_markers.append("ia3_head_gate")
+            else:
+                console.print(
+                    "[yellow]IA³ per-layer head gates requested but attention head count missing; skipping head gates.[/]"
+                )
+
+        ffn_cfg = ia3_cfg.get("ffn_channel_gates")
+        if ffn_cfg and ffn_cfg.get("enabled"):
+            group_size = int(ffn_cfg.get("group_size", 16))
+            target = ffn_cfg.get("target", "gate_proj")
+            attach_ffn_gates(
+                model,
+                group_size,
+                float(ffn_cfg.get("init_value", 1.0)),
+                target,
+            )
+            trainable_markers.append("channel_gate")
+
+        attn_cfg = ia3_cfg.get("attention_logit_gates")
+        if attn_cfg and attn_cfg.get("enabled"):
+            per_head = bool(attn_cfg.get("per_head", False))
+            if not per_head:
+                per_head = not bool(attn_cfg.get("per_layer", True))
+            attach_attention_logit_gates(
+                model,
+                per_head=per_head,
+                init_value=float(attn_cfg.get("init_value", 1.0)),
+            )
+            trainable_markers.append("logit_gate")
+
+    markers = tuple(dict.fromkeys(trainable_markers))
+    for name, param in model.named_parameters():
+        trainable = any(marker in name for marker in markers)
+        param.requires_grad = trainable
 
     return model

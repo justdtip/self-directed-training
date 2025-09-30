@@ -144,7 +144,17 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     named_params = getattr(model, "named_parameters", None)
     if callable(named_params):
         for name, param in named_params():
-            if any(tag in name for tag in ("lora_", "loraA", "loraB", "ia3_gate")):
+            if any(
+                tag in name
+                for tag in (
+                    "lora_",
+                    "loraA",
+                    "loraB",
+                    "ia3_gate",
+                    "ia3_head_gate",
+                    "channel_gate",
+                )
+            ):
                 param.requires_grad = True
             else:
                 param.requires_grad = False
@@ -186,8 +196,12 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     total_params = 0
     trainable_params = 0
     per_lora_module: Dict[str, int] = {}
-    ia3_total = 0
-    ia3_per_module: Dict[str, int] = {}
+    ia3_scalar_total = 0
+    ia3_scalar_per_module: Dict[str, int] = {}
+    ia3_head_total = 0
+    ia3_head_per_module: Dict[str, int] = {}
+    channel_gate_total = 0
+    logit_gate_total = 0
     if callable(named_params):
         lora_targets = tuple(getattr(model_cfg, "lora_target_modules", ()) or ())
         ia3_targets = ("q_proj", "k_proj", "v_proj", "o_proj")
@@ -204,11 +218,25 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                             per_lora_module[target] = per_lora_module.get(target, 0) + count
                             break
                 elif "ia3_gate" in name:
-                    ia3_total += count
+                    ia3_scalar_total += count
                     for target in ia3_targets:
                         if target in name:
-                            ia3_per_module[target] = ia3_per_module.get(target, 0) + count
+                            ia3_scalar_per_module[target] = (
+                                ia3_scalar_per_module.get(target, 0) + count
+                            )
                             break
+                elif "ia3_head_gate" in name:
+                    ia3_head_total += count
+                    for target in ia3_targets:
+                        if target in name:
+                            ia3_head_per_module[target] = (
+                                ia3_head_per_module.get(target, 0) + count
+                            )
+                            break
+                elif "channel_gate" in name:
+                    channel_gate_total += count
+                elif "logit_gate" in name:
+                    logit_gate_total += count
     if total_params:
         pct = (trainable_params / total_params) * 100.0
         print(
@@ -217,10 +245,19 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     if per_lora_module:
         for module_name, count in sorted(per_lora_module.items()):
             print(f"[LoRA]   {module_name}: {count:,} trainable params")
+    ia3_total = ia3_scalar_total + ia3_head_total
     if ia3_total:
         print(f"[IA3] Trainable parameters: {ia3_total:,}")
-        for module_name, count in sorted(ia3_per_module.items()):
-            print(f"[IA3]   {module_name}: {count:,} trainable params")
+        if ia3_scalar_total:
+            for module_name, count in sorted(ia3_scalar_per_module.items()):
+                print(f"[IA3]   {module_name}: {count:,} trainable params (scalar)")
+        if ia3_head_total:
+            for module_name, count in sorted(ia3_head_per_module.items()):
+                print(f"[IA3]   {module_name}: {count:,} trainable params (head)")
+    if channel_gate_total:
+        print(f"[FFN] Trainable parameters: {channel_gate_total:,}")
+    if logit_gate_total:
+        print(f"[AttnLogit] Trainable parameters: {logit_gate_total:,}")
 
     max_prompt_len = int(rlhf_cfg["max_prompt_length"])
     base_completion_len = int(rlhf_cfg["max_completion_length"])

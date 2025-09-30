@@ -2508,3 +2508,36 @@
 {"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
 {"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
 {"source": "assist", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 1, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 0, "reason": "exec_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "memory_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "count_topo_sorts_mod", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "longest_valid_parentheses", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "longest_valid_parentheses", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "suffix_automaton_distinct_substrings", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "closest_divisors", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "closest_divisors", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "closest_divisors", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "closest_divisors", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "LRUCache2", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.0, "func_name": "LRUCache2", "retries": 0, "reason": "format_error"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "minimal_period", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "minimal_period", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "minimal_period", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "minimal_period", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
+{"source": "policy", "step": 0, "passed": false, "score": 0.05, "func_name": "four_sum_count_zero", "retries": 0, "reason": "assertion_failed"}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
+{"source": "policy", "step": 0, "passed": true, "score": 1.0, "func_name": "four_sum_count_zero", "retries": 0}
+{"source": "assist", "step": 0, "passed": false, "score": 0.05, "func_name": "simulated_annealing_optimize", "retries": 1, "reason": "exec_error"}

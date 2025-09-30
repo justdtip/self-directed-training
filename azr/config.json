@@ -22,7 +22,19 @@
   },
   "ia3": {
     "enabled": true,
-    "init_value": 1.0
+    "init_value": 1.0,
+    "per_layer_head_gates": true,
+    "ffn_channel_gates": {
+      "enabled": true,
+      "group_size": 16,
+      "target": "gate_proj",
+      "init_value": 1.0
+    },
+    "attention_logit_gates": {
+      "enabled": false,
+      "per_layer": true,
+      "init_value": 1.0
+    }
   },
   "penalties": {
     "format_error_penalty": 0.02
