@@ -45,11 +45,12 @@
     },
     "projection_dim_gates": {
       "enabled": true,
-      "init_value": 1.0
+      "init_value": 1.0,
+      "input_enabled": true
     },
     "rope_scale": {
       "enabled": true,
-      "per_layer": false,
+      "per_layer": true,
       "init_value": 1.0
     }
   },

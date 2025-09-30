@@ -138,8 +138,15 @@ def setup_model(
 
         proj_cfg = ia3_cfg.get("projection_dim_gates")
         if proj_cfg and proj_cfg.get("enabled"):
-            attach_projection_dim_gates(model, float(proj_cfg.get("init_value", 1.0)))
+            input_enabled = bool(proj_cfg.get("input_enabled", False))
+            attach_projection_dim_gates(
+                model,
+                float(proj_cfg.get("init_value", 1.0)),
+                input_enabled=input_enabled,
+            )
             trainable_markers.append("projection_gate")
+            if input_enabled:
+                trainable_markers.append("input_projection_gate")
 
         rope_cfg = ia3_cfg.get("rope_scale")
         if rope_cfg and rope_cfg.get("enabled"):

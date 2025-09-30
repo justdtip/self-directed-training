@@ -109,6 +109,22 @@ class ProjectionDimGate(nn.Module):
         return x * scale
 
 
+class InputProjectionGate(nn.Module):
+    """Per-dimension gate applied to projection inputs."""
+
+    def __init__(self, input_dim: int, init_value: float = 1.0) -> None:
+        super().__init__()
+        if input_dim <= 0:
+            raise ValueError("input_dim must be positive for InputProjectionGate")
+        self.scale = nn.Parameter(
+            torch.full((input_dim,), float(init_value), dtype=torch.float32)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        scale = _maybe_to(self.scale, x.device)
+        return x * scale
+
+
 class AttentionLogitGate(nn.Module):
     """Flexible attention gate supporting shared/per-head scaling and warm-up."""
 
@@ -417,7 +433,12 @@ def attach_attention_logit_gates(
         module.add_module("logit_gate", gate)
 
 
-def attach_projection_dim_gates(model: nn.Module, init_value: float = 1.0) -> None:
+def attach_projection_dim_gates(
+    model: nn.Module,
+    init_value: float = 1.0,
+    *,
+    input_enabled: bool = False,
+) -> None:
     """Attach per-dimension projection gates to q/k/v/o layers."""
 
     target_tags = ("q_proj", "k_proj", "v_proj", "o_proj")
@@ -430,24 +451,44 @@ def attach_projection_dim_gates(model: nn.Module, init_value: float = 1.0) -> No
         out_features = getattr(module, "out_features", None)
         if out_features is None:
             continue
+        in_features = getattr(module, "in_features", None)
+        if input_enabled and in_features is None:
+            continue
         try:
             gate = ProjectionDimGate(int(out_features), init_value)
         except ValueError:
             continue
+        input_gate = None
+        if input_enabled:
+            try:
+                input_gate = InputProjectionGate(int(in_features), init_value)
+            except Exception:
+                input_gate = None
 
         original_forward = module.forward
 
-        def gated_forward(input: torch.Tensor, *, _orig=original_forward, _gate=gate):
-            if input.device != gate.scale.device:
-                gate.to(input.device)
-            output = _orig(input)
+        def gated_forward(
+            input_tensor: torch.Tensor,
+            *f_args,
+            _orig=original_forward,
+            _out_gate=gate,
+            _in_gate=input_gate,
+            **f_kwargs,
+        ):
+            if _in_gate is not None:
+                if input_tensor.device != _in_gate.scale.device:
+                    _in_gate.to(input_tensor.device)
+                input_tensor = _in_gate(input_tensor)
+            output = _orig(input_tensor, *f_args, **f_kwargs)
             if isinstance(output, tuple) and output:
-                first = _gate(output[0])
+                first = _out_gate(output[0])
                 return (first, *output[1:])
-            return _gate(output)
+            return _out_gate(output)
 
         module.forward = gated_forward  # type: ignore[assignment]
         module.add_module("projection_gate", gate)
+        if input_gate is not None:
+            module.add_module("input_projection_gate", input_gate)
 
 
 def _iter_decoder_layers(model: nn.Module) -> list[nn.Module]:
@@ -481,36 +522,52 @@ def attach_residual_gates(model: nn.Module, init_value: float = 1.0) -> None:
     if not layers:
         return
 
+    hidden_dim = getattr(getattr(model, "config", None), "hidden_size", None)
+    if hidden_dim is None:
+        sample_attn = getattr(getattr(layers[0], "self_attn", None), "o_proj", None)
+        if sample_attn is not None:
+            hidden_dim = getattr(sample_attn, "out_features", None)
+    if hidden_dim is None:
+        return
+
+    hidden_dim = int(hidden_dim)
+
     for layer in layers:
-        if hasattr(layer, "residual_gate"):
+        attn_mod = getattr(layer, "self_attn", None)
+        mlp_mod = getattr(layer, "mlp", None)
+        if attn_mod is None or mlp_mod is None:
+            continue
+        if hasattr(layer, "attn_residual_gate") or hasattr(layer, "ffn_residual_gate"):
             continue
 
-        hidden_dim = None
-        if hasattr(layer, "self_attn") and hasattr(layer.self_attn, "o_proj"):
-            hidden_dim = getattr(layer.self_attn.o_proj, "out_features", None)
-        if hidden_dim is None and hasattr(layer, "mlp") and hasattr(layer.mlp, "gate_proj"):
-            hidden_dim = getattr(layer.mlp.gate_proj, "out_features", None)
-        if hidden_dim is None:
-            continue
+        gate_attn = ResidualStreamGate(hidden_dim, init_value)
+        gate_ffn = ResidualStreamGate(hidden_dim, init_value)
 
-        try:
-            gate = ResidualStreamGate(int(hidden_dim), init_value)
-        except ValueError:
-            continue
+        original_attn_forward = attn_mod.forward
+        original_mlp_forward = mlp_mod.forward
 
-        original_forward = layer.forward
-
-        def gated_forward(*args, __orig=original_forward, __gate=gate, **kwargs):
+        def gated_attn_forward(*args, __orig=original_attn_forward, __gate=gate_attn, **kwargs):
             output = __orig(*args, **kwargs)
             if isinstance(output, tuple):
                 if not output:
                     return output
-                hidden = __gate(output[0])
-                return (hidden, *output[1:])
+                attn_out = __gate(output[0])
+                return (attn_out, *output[1:])
             return __gate(output)
 
-        layer.forward = gated_forward  # type: ignore[assignment]
-        layer.add_module("residual_gate", gate)
+        def gated_mlp_forward(*args, __orig=original_mlp_forward, __gate=gate_ffn, **kwargs):
+            output = __orig(*args, **kwargs)
+            if isinstance(output, tuple):
+                if not output:
+                    return output
+                ffn_out = __gate(output[0])
+                return (ffn_out, *output[1:])
+            return __gate(output)
+
+        attn_mod.forward = gated_attn_forward  # type: ignore[assignment]
+        mlp_mod.forward = gated_mlp_forward  # type: ignore[assignment]
+        layer.add_module("attn_residual_gate", gate_attn)
+        layer.add_module("ffn_residual_gate", gate_ffn)
 
 
 def _wrap_rotary_embedding(rotary_module: nn.Module, init_value: float) -> None:

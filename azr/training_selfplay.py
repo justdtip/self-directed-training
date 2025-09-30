@@ -196,6 +196,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     "residual_gate",
                     "projection_gate",
                     "rope_scale",
+                    "input_projection_gate",
                 )
             ):
                 param.requires_grad = True
