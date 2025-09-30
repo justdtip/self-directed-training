@@ -4,6 +4,10 @@ import torch
 from torch import nn
 
 
+def _maybe_to(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
+    return tensor if tensor.device == device else tensor.to(device)
+
+
 class IA3Gate(nn.Module):
     """Per-channel multiplicative gate used for IA³ adapters."""
 
@@ -38,8 +42,7 @@ class IA3HeadGate(nn.Module):
         x = x.reshape(new_shape)
         scale_shape = (1,) * (x.dim() - 2) + (num_heads, 1)
         scale = self.scale.view(*scale_shape)
-        if scale.device != x.device:
-            scale = scale.to(x.device)
+        scale = _maybe_to(scale, x.device)
         x = x * scale
         return x.reshape(*x.shape[:-2], expected)
 
@@ -68,40 +71,120 @@ class ChannelGate(nn.Module):
         new_shape = (*x.shape[:-1], num_groups, group_size)
         x = x.reshape(new_shape)
         scale = self.scale.view((1,) * (x.dim() - 2) + (num_groups, 1))
-        if scale.device != x.device:
-            scale = scale.to(x.device)
+        scale = _maybe_to(scale, x.device)
         x = x * scale
         return x.reshape(*x.shape[:-2], hidden_dim)
 
 
-class AttentionLogitGate(nn.Module):
-    """Scales attention logits by modulating query states per head or per layer."""
+class ResidualStreamGate(nn.Module):
+    """Per-dimension gate applied to residual streams."""
 
-    def __init__(self, num_heads: int, *, per_head: bool, init_value: float = 1.0) -> None:
+    def __init__(self, hidden_dim: int, init_value: float = 1.0) -> None:
+        super().__init__()
+        if hidden_dim <= 0:
+            raise ValueError("hidden_dim must be positive for ResidualStreamGate")
+        self.scale = nn.Parameter(
+            torch.full((hidden_dim,), float(init_value), dtype=torch.float32)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        scale = self.scale
+        scale = _maybe_to(scale, x.device)
+        return x * scale
+
+
+class ProjectionDimGate(nn.Module):
+    """Per-dimension gate applied to projection outputs."""
+
+    def __init__(self, hidden_dim: int, init_value: float = 1.0) -> None:
+        super().__init__()
+        if hidden_dim <= 0:
+            raise ValueError("hidden_dim must be positive for ProjectionDimGate")
+        self.scale = nn.Parameter(
+            torch.full((hidden_dim,), float(init_value), dtype=torch.float32)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        scale = _maybe_to(self.scale, x.device)
+        return x * scale
+
+
+class AttentionLogitGate(nn.Module):
+    """Flexible attention gate supporting shared/per-head scaling and warm-up."""
+
+    def __init__(
+        self,
+        num_heads: int,
+        *,
+        per_head: bool,
+        shared: bool = False,
+        init_value: float = 1.0,
+        target: str = "query",
+    ) -> None:
         super().__init__()
         if num_heads <= 0:
             raise ValueError("num_heads must be positive for AttentionLogitGate")
         self.per_head = per_head
-        size = num_heads if per_head else 1
-        self.scale = nn.Parameter(
-            torch.full((size,), float(init_value), dtype=torch.float32)
-        )
+        self.shared = shared
+        self.target = target
+        size = 1 if shared or not per_head else num_heads
+        self.scale = nn.Parameter(torch.full((size,), float(init_value), dtype=torch.float32))
+        self.warmup_alpha: float = 1.0
 
-    def forward(self, scores: torch.Tensor) -> torch.Tensor:
-        scale = self.scale
-        if scale.device != scores.device:
-            scale = scale.to(scores.device)
-        if self.per_head and scale.numel() == scores.shape[1]:
-            return scores * scale.view(1, -1, 1, 1)
-        return scores * scale.view(1, 1, 1, 1)
+    def set_warmup_alpha(self, alpha: float) -> None:
+        self.warmup_alpha = float(alpha)
 
-    def apply_to_query(self, query: torch.Tensor) -> torch.Tensor:
+    def _effective_scale(self, device: torch.device) -> torch.Tensor:
         scale = self.scale
-        if scale.device != query.device:
-            scale = scale.to(query.device)
-        if self.per_head and scale.numel() == query.shape[1]:
-            return query * scale.view(1, -1, 1, 1)
-        return query * scale.view(1, 1, 1, 1)
+        if scale.device != device:
+            scale = scale.to(device)
+        if self.warmup_alpha != 1.0:
+            scale = scale * self.warmup_alpha
+        return scale
+
+    def _reshape_scale(self, scale: torch.Tensor, num_heads: int) -> torch.Tensor:
+        if scale.numel() == 1 or self.shared or not self.per_head:
+            return scale.view(1, 1, 1, 1)
+        if scale.numel() == num_heads:
+            return scale.view(1, num_heads, 1, 1)
+        return scale.mean().view(1, 1, 1, 1)
+
+    def modulate(
+        self, query: torch.Tensor, key: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        scale = self._effective_scale(query.device)
+        if self.target == "logits":
+            scale = torch.clamp(scale, min=1e-6)
+            sqrt_scale = torch.sqrt(scale)
+            factor_q = self._reshape_scale(sqrt_scale, query.shape[1]).to(query.dtype)
+            query = query * factor_q
+            if key is not None:
+                factor_k = factor_q
+                if factor_q.shape[1] not in (1, key.shape[1]):
+                    if factor_q.shape[1] % key.shape[1] == 0:
+                        group = factor_q.shape[1] // key.shape[1]
+                        factor_k = factor_q.view(1, key.shape[1], group, 1, 1).mean(dim=2)
+                    else:
+                        factor_k = factor_q.mean(dim=1, keepdim=True)
+                factor_k = factor_k.to(key.dtype)
+                key = key * factor_k
+            return query, key
+
+        factor = self._reshape_scale(scale, query.shape[1]).to(query.dtype)
+        query = query * factor
+        return query, key
+
+
+class RoPEScale(nn.Module):
+    """Scales rotary positional embeddings."""
+
+    def __init__(self, init_value: float = 1.0) -> None:
+        super().__init__()
+        self.scale = nn.Parameter(torch.tensor(float(init_value), dtype=torch.float32))
+
+    def forward(self, cos: torch.Tensor, sin: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        scale = _maybe_to(self.scale, cos.device)
+        return cos * scale, sin * scale
 
 
 def attach_ia3_gates(model: nn.Module, init_value: float = 1.0) -> None:
@@ -220,6 +303,24 @@ def attach_ffn_gates(
 _ATTENTION_WRAPPED = False
 
 
+def _infer_attention_heads(module: nn.Module) -> int | None:
+    num_heads = getattr(module, "num_heads", None) or getattr(
+        module, "num_attention_heads", None
+    )
+    if num_heads:
+        return int(num_heads)
+    head_dim = getattr(module, "head_dim", None)
+    q_proj = getattr(module, "q_proj", None)
+    if head_dim and q_proj is not None and hasattr(q_proj, "out_features"):
+        try:
+            num = int(q_proj.out_features // head_dim)
+            if num > 0:
+                return num
+        except Exception:
+            return None
+    return None
+
+
 def _wrap_attention_function(fn):
     if getattr(fn, "_azr_logit_gate_wrapped", False):
         return fn
@@ -227,8 +328,8 @@ def _wrap_attention_function(fn):
     def wrapped(module, query, key, value, attention_mask, scaling, dropout=0.0, **kwargs):
         gate: AttentionLogitGate | None = getattr(module, "logit_gate", None)
         if gate is not None:
-            query = gate.apply_to_query(query)
-        return fn(module, query, key, value, attention_mask, scaling, dropout=dropout, **kwargs)
+            query, key = gate.modulate(query, key)
+        return fn(module, query, key, value, attention_mask, scaling, dropout, **kwargs)
 
     wrapped._azr_logit_gate_wrapped = True  # type: ignore[attr-defined]
     wrapped._azr_logit_gate_base = fn  # type: ignore[attr-defined]
@@ -257,24 +358,194 @@ def attach_attention_logit_gates(
     model: nn.Module,
     *,
     per_head: bool,
+    per_layer: bool = True,
+    shared: bool = False,
     init_value: float = 1.0,
+    target: str = "query",
 ) -> None:
-    """Attach attention logit gates that scale query states prior to softmax."""
+    """Attach attention logit gates with optional sharing and target selection."""
 
     _ensure_attention_wrapper()
 
+    if not per_layer:
+        shared = True
+
+    if target not in {"query", "logits"}:
+        target = "query"
+
+    attention_modules: list[nn.Module] = []
     for module in model.modules():
-        if not hasattr(module, "q_proj") or not hasattr(module, "num_heads"):
+        if not hasattr(module, "q_proj"):
             continue
+        if not hasattr(module, "head_dim"):
+            continue
+        attention_modules.append(module)
+
+    if not attention_modules:
+        return
+
+    if shared:
+        sample = attention_modules[0]
+        num_heads = _infer_attention_heads(sample)
+        if not num_heads:
+            return
+        gate = AttentionLogitGate(
+            int(num_heads), per_head=per_head, shared=True, init_value=init_value, target=target
+        )
+        name = "logit_gate_shared"
+        index = 0
+        while hasattr(model, name):
+            index += 1
+            name = f"logit_gate_shared_{index}"
+        model.add_module(name, gate)
+        for module in attention_modules:
+            setattr(module, "logit_gate", gate)
+        return
+
+    for module in attention_modules:
         if hasattr(module, "logit_gate"):
             continue
-        num_heads = getattr(module, "num_heads", None) or getattr(
-            module, "num_attention_heads", None
-        )
+        num_heads = _infer_attention_heads(module)
         if not num_heads:
             continue
         try:
-            gate = AttentionLogitGate(int(num_heads), per_head=per_head, init_value=init_value)
+            gate = AttentionLogitGate(
+                int(num_heads), per_head=per_head, shared=False, init_value=init_value, target=target
+            )
         except ValueError:
             continue
         module.add_module("logit_gate", gate)
+
+
+def attach_projection_dim_gates(model: nn.Module, init_value: float = 1.0) -> None:
+    """Attach per-dimension projection gates to q/k/v/o layers."""
+
+    target_tags = ("q_proj", "k_proj", "v_proj", "o_proj")
+
+    for name, module in model.named_modules():
+        if not any(tag in name for tag in target_tags):
+            continue
+        if hasattr(module, "projection_gate"):
+            continue
+        out_features = getattr(module, "out_features", None)
+        if out_features is None:
+            continue
+        try:
+            gate = ProjectionDimGate(int(out_features), init_value)
+        except ValueError:
+            continue
+
+        original_forward = module.forward
+
+        def gated_forward(input: torch.Tensor, *, _orig=original_forward, _gate=gate):
+            if input.device != gate.scale.device:
+                gate.to(input.device)
+            output = _orig(input)
+            if isinstance(output, tuple) and output:
+                first = _gate(output[0])
+                return (first, *output[1:])
+            return _gate(output)
+
+        module.forward = gated_forward  # type: ignore[assignment]
+        module.add_module("projection_gate", gate)
+
+
+def _iter_decoder_layers(model: nn.Module) -> list[nn.Module]:
+    queue = [model]
+    seen: set[int] = set()
+    while queue:
+        node = queue.pop(0)
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+
+        layers = getattr(node, "layers", None)
+        if layers is not None:
+            if isinstance(layers, (list, tuple)):
+                return list(layers)
+            if hasattr(layers, "__iter__"):
+                return list(layers)
+
+        for attr in ("model", "decoder", "base_model"):
+            child = getattr(node, attr, None)
+            if child is not None:
+                queue.append(child)
+
+    return []
+
+
+def attach_residual_gates(model: nn.Module, init_value: float = 1.0) -> None:
+    """Attach per-layer residual stream gates to decoder layers."""
+
+    layers = _iter_decoder_layers(model)
+    if not layers:
+        return
+
+    for layer in layers:
+        if hasattr(layer, "residual_gate"):
+            continue
+
+        hidden_dim = None
+        if hasattr(layer, "self_attn") and hasattr(layer.self_attn, "o_proj"):
+            hidden_dim = getattr(layer.self_attn.o_proj, "out_features", None)
+        if hidden_dim is None and hasattr(layer, "mlp") and hasattr(layer.mlp, "gate_proj"):
+            hidden_dim = getattr(layer.mlp.gate_proj, "out_features", None)
+        if hidden_dim is None:
+            continue
+
+        try:
+            gate = ResidualStreamGate(int(hidden_dim), init_value)
+        except ValueError:
+            continue
+
+        original_forward = layer.forward
+
+        def gated_forward(*args, __orig=original_forward, __gate=gate, **kwargs):
+            output = __orig(*args, **kwargs)
+            if isinstance(output, tuple):
+                if not output:
+                    return output
+                hidden = __gate(output[0])
+                return (hidden, *output[1:])
+            return __gate(output)
+
+        layer.forward = gated_forward  # type: ignore[assignment]
+        layer.add_module("residual_gate", gate)
+
+
+def _wrap_rotary_embedding(rotary_module: nn.Module, init_value: float) -> None:
+    if hasattr(rotary_module, "rope_scale"):
+        return
+    scale_module = RoPEScale(init_value)
+    original_forward = rotary_module.forward
+
+    def scaled_forward(*args, __orig=original_forward, __scale=scale_module, **kwargs):
+        cos, sin = __orig(*args, **kwargs)
+        return __scale(cos, sin)
+
+    rotary_module.forward = scaled_forward  # type: ignore[assignment]
+    rotary_module.add_module("rope_scale", scale_module)
+
+
+def attach_rope_scale(
+    model: nn.Module,
+    *,
+    per_layer: bool = False,
+    init_value: float = 1.0,
+) -> None:
+    """Attach learnable RoPE scaling either globally or per layer."""
+
+    layers = _iter_decoder_layers(model)
+
+    if per_layer and layers:
+        for layer in layers:
+            rotary = getattr(getattr(layer, "self_attn", None), "rotary_emb", None)
+            if rotary is None:
+                continue
+            _wrap_rotary_embedding(rotary, init_value)
+        return
+
+    for module in model.modules():
+        if module.__class__.__name__.lower().endswith("rotaryembedding"):
+            _wrap_rotary_embedding(module, init_value)
+            break

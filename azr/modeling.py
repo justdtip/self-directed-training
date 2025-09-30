@@ -12,6 +12,9 @@ from .adapters import (
     attach_ffn_gates,
     attach_ia3_gates,
     attach_per_layer_head_gates,
+    attach_projection_dim_gates,
+    attach_residual_gates,
+    attach_rope_scale,
 )
 
 
@@ -120,14 +123,37 @@ def setup_model(
         attn_cfg = ia3_cfg.get("attention_logit_gates")
         if attn_cfg and attn_cfg.get("enabled"):
             per_head = bool(attn_cfg.get("per_head", False))
-            if not per_head:
-                per_head = not bool(attn_cfg.get("per_layer", True))
+            per_layer = bool(attn_cfg.get("per_layer", True))
+            shared = bool(attn_cfg.get("shared", False))
+            target = attn_cfg.get("target", "query")
             attach_attention_logit_gates(
                 model,
                 per_head=per_head,
+                per_layer=per_layer,
+                shared=shared,
                 init_value=float(attn_cfg.get("init_value", 1.0)),
+                target=target,
             )
             trainable_markers.append("logit_gate")
+
+        proj_cfg = ia3_cfg.get("projection_dim_gates")
+        if proj_cfg and proj_cfg.get("enabled"):
+            attach_projection_dim_gates(model, float(proj_cfg.get("init_value", 1.0)))
+            trainable_markers.append("projection_gate")
+
+        rope_cfg = ia3_cfg.get("rope_scale")
+        if rope_cfg and rope_cfg.get("enabled"):
+            attach_rope_scale(
+                model,
+                per_layer=bool(rope_cfg.get("per_layer", False)),
+                init_value=float(rope_cfg.get("init_value", 1.0)),
+            )
+            trainable_markers.append("rope_scale")
+
+        res_cfg = ia3_cfg.get("residual_gates")
+        if res_cfg and res_cfg.get("enabled"):
+            attach_residual_gates(model, float(res_cfg.get("init_value", 1.0)))
+            trainable_markers.append("residual_gate")
 
     markers = tuple(dict.fromkeys(trainable_markers))
     for name, param in model.named_parameters():

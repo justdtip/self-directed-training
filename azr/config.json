@@ -31,8 +31,25 @@
       "init_value": 1.0
     },
     "attention_logit_gates": {
-      "enabled": false,
+      "enabled": true,
+      "per_head": false,
       "per_layer": true,
+      "shared": false,
+      "target": "query",
+      "init_value": 1.0,
+      "scale_warmup_steps": 0
+    },
+    "residual_gates": {
+      "enabled": true,
+      "init_value": 1.0
+    },
+    "projection_dim_gates": {
+      "enabled": true,
+      "init_value": 1.0
+    },
+    "rope_scale": {
+      "enabled": true,
+      "per_layer": false,
       "init_value": 1.0
     }
   },

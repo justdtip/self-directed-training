@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import torch
+from torch import nn
 from trl.trainer.grpo_trainer import GRPOConfig, GRPOTrainer
 from transformers.trainer_callback import TrainerCallback
 
@@ -81,6 +82,44 @@ def _default_examples() -> List[DataExample]:
             memory_mb=256,
         ),
     ]
+
+
+def _collect_logit_gates(model: nn.Module) -> List[nn.Module]:
+    gates: List[nn.Module] = []
+    seen: set[int] = set()
+    for module in model.modules():
+        gate = getattr(module, "logit_gate", None)
+        if gate is None:
+            continue
+        gate_id = id(gate)
+        if gate_id in seen:
+            continue
+        seen.add(gate_id)
+        gates.append(gate)
+    shared_gate = getattr(model, "logit_gate_shared", None)
+    if shared_gate is not None and id(shared_gate) not in seen:
+        gates.append(shared_gate)
+    return gates
+
+
+class _LogitGateWarmupCallback(TrainerCallback):
+    def __init__(self, gates: List[nn.Module], warmup_steps: int) -> None:
+        self._gates = gates
+        self._warmup_steps = max(1, warmup_steps)
+
+    def _apply(self, step: int) -> None:
+        alpha = min(1.0, max(0.0, step / self._warmup_steps))
+        for gate in self._gates:
+            if hasattr(gate, "set_warmup_alpha"):
+                gate.set_warmup_alpha(alpha)
+
+    def on_train_begin(self, args, state, control, **kwargs):  # type: ignore[override]
+        self._apply(getattr(state, "global_step", 0))
+        return control
+
+    def on_step_begin(self, args, state, control, **kwargs):  # type: ignore[override]
+        self._apply(getattr(state, "global_step", 0))
+        return control
 
 
 def build_trainer(
@@ -204,6 +243,12 @@ def build_trainer(
     # Align lm_head dtype with the model's parameters to avoid Float/BFloat16 errors.
     if hasattr(trainer, "add_callback"):
         trainer.add_callback(_EnsureLmHeadDtype())
+        attn_cfg = (config.get("ia3") or {}).get("attention_logit_gates", {})
+        warm_steps = int(attn_cfg.get("scale_warmup_steps", 0) or 0)
+        if warm_steps > 0:
+            gates = _collect_logit_gates(model)
+            if gates:
+                trainer.add_callback(_LogitGateWarmupCallback(gates, warm_steps))
     return trainer
 
 

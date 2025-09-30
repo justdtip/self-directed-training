@@ -9,6 +9,7 @@ from inspect import signature
 from transformers import set_seed
 from transformers.trainer_callback import TrainerCallback
 import torch
+from torch import nn
 import random
 import re
 from trl.trainer.grpo_trainer import GRPOConfig
@@ -99,6 +100,44 @@ def _merge_rlhf(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return defaults
 
 
+def _collect_logit_gates(model: nn.Module) -> List[nn.Module]:
+    gates: List[nn.Module] = []
+    seen: set[int] = set()
+    for module in model.modules():
+        gate = getattr(module, "logit_gate", None)
+        if gate is None:
+            continue
+        gate_id = id(gate)
+        if gate_id in seen:
+            continue
+        seen.add(gate_id)
+        gates.append(gate)
+    shared_gate = getattr(model, "logit_gate_shared", None)
+    if shared_gate is not None and id(shared_gate) not in seen:
+        gates.append(shared_gate)
+    return gates
+
+
+class _LogitGateWarmupCallback(TrainerCallback):
+    def __init__(self, gates: List[nn.Module], warmup_steps: int) -> None:
+        self._gates = gates
+        self._warmup_steps = max(1, warmup_steps)
+
+    def _apply(self, step: int) -> None:
+        alpha = min(1.0, max(0.0, step / self._warmup_steps))
+        for gate in self._gates:
+            if hasattr(gate, "set_warmup_alpha"):
+                gate.set_warmup_alpha(alpha)
+
+    def on_train_begin(self, args, state, control, **kwargs):  # type: ignore[override]
+        self._apply(getattr(state, "global_step", 0))
+        return control
+
+    def on_step_begin(self, args, state, control, **kwargs):  # type: ignore[override]
+        self._apply(getattr(state, "global_step", 0))
+        return control
+
+
 def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     """Build and return a GRPOTrainer using self-play and code-execution rewards."""
 
@@ -153,6 +192,10 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     "ia3_gate",
                     "ia3_head_gate",
                     "channel_gate",
+                    "logit_gate",
+                    "residual_gate",
+                    "projection_gate",
+                    "rope_scale",
                 )
             ):
                 param.requires_grad = True
@@ -202,6 +245,9 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     ia3_head_per_module: Dict[str, int] = {}
     channel_gate_total = 0
     logit_gate_total = 0
+    residual_gate_total = 0
+    projection_gate_total = 0
+    rope_scale_total = 0
     if callable(named_params):
         lora_targets = tuple(getattr(model_cfg, "lora_target_modules", ()) or ())
         ia3_targets = ("q_proj", "k_proj", "v_proj", "o_proj")
@@ -237,6 +283,12 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     channel_gate_total += count
                 elif "logit_gate" in name:
                     logit_gate_total += count
+                elif "residual_gate" in name:
+                    residual_gate_total += count
+                elif "projection_gate" in name:
+                    projection_gate_total += count
+                elif "rope_scale" in name:
+                    rope_scale_total += count
     if total_params:
         pct = (trainable_params / total_params) * 100.0
         print(
@@ -258,6 +310,12 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         print(f"[FFN] Trainable parameters: {channel_gate_total:,}")
     if logit_gate_total:
         print(f"[AttnLogit] Trainable parameters: {logit_gate_total:,}")
+    if residual_gate_total:
+        print(f"[Residual] Trainable parameters: {residual_gate_total:,}")
+    if projection_gate_total:
+        print(f"[ProjDim] Trainable parameters: {projection_gate_total:,}")
+    if rope_scale_total:
+        print(f"[RoPEScale] Trainable parameters: {rope_scale_total:,}")
 
     max_prompt_len = int(rlhf_cfg["max_prompt_length"])
     base_completion_len = int(rlhf_cfg["max_completion_length"])
@@ -1017,6 +1075,12 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     else:
         trainer_kwargs["processing_class"] = tokenizer
     trainer = GRPOTrainer(**trainer_kwargs)
+    attn_cfg = (cfg_map.get("ia3") or {}).get("attention_logit_gates", {})
+    warm_steps = int(attn_cfg.get("scale_warmup_steps", 0) or 0)
+    if warm_steps > 0 and hasattr(trainer, "add_callback"):
+        gates = _collect_logit_gates(model)
+        if gates:
+            trainer.add_callback(_LogitGateWarmupCallback(gates, warm_steps))
     trainer.gen_logger = gen_logger
     trainer.scoreboard = scoreboard
     trainer.log_options = {
