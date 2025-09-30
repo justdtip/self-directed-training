@@ -20,6 +20,10 @@
     "top_p": 0.92,
     "retry_temperature": 0.2
   },
+  "ia3": {
+    "enabled": true,
+    "init_value": 1.0
+  },
   "penalties": {
     "format_error_penalty": 0.02
   },

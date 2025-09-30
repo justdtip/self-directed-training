@@ -1,95 +1,139 @@
-# AZR RLHF Harness – Detailed Codebase Summary
+# Self‑Directed Training Repository Audit
 
-## Project Overview
-AZR provides a reinforcement-learning-from-human-feedback (RLHF) training harness centered on GRPO and QLoRA fine-tuning, plus a sandboxed tool ecosystem for code-evaluation rewards and web access. It ships CLI entry points, self-play infrastructure, tool execution sandboxes, and automation YAMLs for bootstrapping remote machines.
+This audit summarises the structure and behaviour of the justdtip/self‑directed‑training repository. The project implements a reinforcement‑learning‑from‑human‑feedback (RLHF) pipeline that fine‑tunes a base language model to solve coding and algorithmic tasks through self‑play and teacher hints. The summary below is organised file by file and highlights cross‑module interactions, training workflow, configuration, and proposed enhancements.
 
-## Top-Level Files & Scripts
-- `README.md` – Quickstart instructions, GRPO notes, CLI usage, test guidance.
-- `pyproject.toml` – Build metadata, core dependencies, console scripts (`azr-train`, `azr-eval`, `azr-gen`).
-- `requirements.txt` – Runtime dependency list for deployments.
-- `pytest.ini` – Defines the `network` marker for web-dependent tests.
-- `SPEC_FUNCTIONS.md` – Authoritative specification for tool sandboxing, web utilities, reward functions, and acceptance tests.
-- `tool_harness.py` – nsjail-aware Python execution harness returning stdout/stderr/return code dictionaries.
-- `tool_loop.py` (root) – Re-exports `azr.tool_loop` for backwards compatibility.
-- `rewards.py` (root) – Lightweight reward helpers for GSPO scripts (code execution + bonuses).
-- `collect_rollouts.py` – Generates tool-augmented rollouts using the harness and writes JSONL datasets.
-- `rl_train_gspo.py` / `rl_train_gspo_selfplay.py` – GRPO entry points (with/without self-play) using Unsloth model loading.
-- `run_smoke.py` – Basic sandbox/web tool smoke test.
-- `sft_train.py` – Converts rollouts into supervised chat pairs and runs a PEFT-aware Trainer loop.
-- `opt_azr_params.py` – Resolves `azr.params.yaml` from env or canonical paths for scripts/tests.
-- `selfplay_manager.py`, `tool_loop.py` (root) – Compatibility wrappers exporting `azr` implementations.
-- `tmp_config.json`, `tmp_tiny_config.json` – Tiny-model configs for smoke tests.
-- `logs/` – Example runtime log output (not code).
+## 1\. Top‑level overview
 
-## Core Package `azr/`
-- `__init__.py` – Re-exports `load_config` for convenience.
-- `callbacks.py` – `TrainingMetricsCallback` streams trainer logs to console and JSONL at runtime.
-- `cli.py` – Click CLI that selects standard vs self-play training, handles log teeing, dataset overrides, checkpoint resume, and optional vLLM sidecar launch.
-- `codegate.py` – Utilities to validate generated Python code (extract last block, ensure function signatures) used in teacher retries.
-- `config.py` – Dataclasses for model, training, self-play, and vLLM configs; legacy schema normalization; YAML load/save helpers.
-- `config.json` – Default full configuration (model ID, GRPO hyperparameters, thinking budgets, remote opponent/teacher setup, logging, dataset).
-- `data.py` – JSONL loader returning `DataExample` objects (prompt, tests, resource limits).
-- `failure_logger.py` – Asynchronous frontier logger writing `neither` and `opponent_only` cases to JSONL files.
-- `generation_logger.py` – Background queue writing prompt/completion telemetry (optionally pretty-printed) with rotation/flush controls.
-- `logging_io.py` – Durable file writes (`append_jsonl`, atomic JSON/text) used by loggers and scoreboard.
-- `modeling.py` – Loads tokenizer (ensuring pad token), builds PEFT LoRA model, optionally prepares 4-bit quantization via bitsandbytes.
-- `opponent_provider_together.py` – Async TogetherAI chat client supporting concurrency, retry, and optional thinking budgets.
-- `openai_provider.py` – Async OpenAI Responses client with structured prompt support, usage stats caching, and fallback handling.
-- `prompts_assist.py` – Shared prompt templates for policy/opponent modes, thinking flags, teacher hints, and retry instructions.
-- `rewards.py` – Strict reward shaping: enforces single code block + final answer, executes tests via sandboxed python, records traces, applies bonuses/penalties.
-- `sandbox.py` – `ToolSandbox` dataclass enforcing max tool turns plus simple resource limits metadata.
-- `scoreboard.py` – Thread-safe scoreboard tracking policy vs opponent outcomes with Wilson interval reporting to JSON/text.
-- `selfplay_manager.py` – Central orchestration for self-play: handles local/remote opponents, teacher hints, LoRA snapshot updates, logging hooks, and score computation.
-- `simple_rewards.py` – Basic keyword and length-based reward components used by the standard trainer.
-- `tool_loop.py` – Loads tool schema, dispatches calls to sandboxed python/web implementations, and runs multi-turn tool reasoning loops with JSON call detection.
-- `tools/__init__.py` – Exposes python/web tool helpers (`run_code`, `WebTool`).
-- `tools/python_tool.py` – POSIX-rlimit-based sandbox runner used inside pure-Python environments.
-- `tools/web.py` – Streaming DuckDuckGo search and HTTP fetch with readability cleanup, respecting max byte limits.
-- `training.py` – Standard GRPO trainer builder: loads model/tokenizer, wraps dataset, defines simple reward function, adds dtype-alignment callback.
-- `training_selfplay.py` – Full self-play trainer: integrates thinking budgets, opponent blending, teacher assists, scoreboard updates, telemetry logging, retry gating, and LoRA updates.
-- `trainer_overrides.py` – GRPOTrainer subclass disabling KV cache when gradient checkpointing is active.
-- `utils.py` – Shared `rich` console instance and device/environment helpers.
-- `vllm_launcher.py` – Context manager launching vLLM sidecars, polling health, and ensuring graceful teardown.
+The repository contains a single Python package azr and various scripts, configuration files and data:
 
-## Automation & Deployment YAML
-- `azr.bootstrap.yaml` – System provisioning steps (apt packages, Python venv, CUDA PyTorch install, Unsloth stack, Playwright setup).
-- `azr.files.yaml` – Declarative file materialization (nsjail wrapper, tool harness, web tool, schema, training script) for remote deployments.
-- `azr.symlink.yaml` – Links `azr.params.yaml` into `/opt/azr`.
-- `azr.apply-tools.yaml` – Workflow ensuring deps installed, files materialized, params copied, smoke tests run.
-- `azr.apply-selfplay.yaml` & `azr.selfplay.impl.yaml` – Materials for deployed self-play scripts/managers.
-- `azr.run.yaml` – Orchestrated bootstrap pipeline culminating in a demo training run.
-- `azr.run-rl-selfplay.yaml` – One-step run command executing self-play training with environment exports.
-- `azr.unsloth.yaml` – Default Unsloth hyperparameters and logging cadence.
-- `azr.tools-train.impl.yaml` – Placeholder spec (currently empty `files: []`).
+| Type | File(s) | Role |
+| --- | --- | --- |
+| Documentation | CODEBASE_SUMMARY.md | Detailed narrative of the self‑play training pipeline, modules and future extensions. |
+| Scripts | sft_train.py, collect_rollouts.py, rl_train_gspo.py, rl_train_gspo_selfplay.py | Entry points for fine‑tuning and RLHF training. They set up models via LoRA, load datasets, build reward functions, and run training loops. rl_train_gspo_selfplay.pyadds self‑play scoring and uses a remote opponent. |
+| Configuration | azr/config.json | Defines model parameters, LoRA hyper‑parameters, RLHF settings, hidden‑reasoning budgets, self‑play weight, remote opponent/teacher providers, teacher‑assist probabilities and data paths[1]. This file is loaded by azr/cli.py and training scripts. |
+| Dataset | azr/data/train.jsonl | JSONL dataset of coding/algorithmic tasks with Python unit tests, memory and time limits. Tasks cover arithmetic, dynamic programming, graph and geometry problems. |
+| Workflow YAMLs | .github/workflows/*.yml, azr.run.yaml, azr.bootstrap.yamland related files | CI/CD for testing, packaging and environment setup. They install dependencies, bootstrap unsloth, copy parameter files and orchestrate smoke tests and RLHF runs. |
+| Testing | tests/test_schema.py, scripts/test_opponent_responses.py, scripts/test_openai_teacher.py | Validate YAML schemas, verify remote opponent and teacher responses, and check that tasks and hints are formatted correctly. |
 
-## Datasets & Artifacts
-- `azr/data/train.jsonl` – Coding prompts with assert-based unit tests and resource budgets used for reward evaluation.
-- `examples/azr.params.yaml` – Reference parameter bundle for remote jobs (model info, sandbox/web settings, hardware description).
-- `examples/sample_prompts.jsonl` – Tiny chat dataset for CLI smoke runs.
-- `trainer_output/` – Artifacts from sample training runs (model card, adapter weights, tokenizer, metrics, scoreboard, generation logs).
+## 2\. Core package azr
 
-## Runtime Diagnostics Scripts
-- `scripts/test_openai_teacher.py` – Samples a training problem and requests an OpenAI teacher hint via `OpenAIResponsesProvider`.
-- `scripts/test_opponent_responses.py` – Instantiates `SelfPlayManager` and fetches a single opponent completion using the configured remote provider.
+The azr package contains the logic for model setup, prompting, self‑play, rewards and utilities.
 
-## Test Suite (`tests/`)
-- `conftest.py` – Ensures repo and `/opt/azr` live on `sys.path` for imports.
-- YAML structure tests (`test_apply_tools_yaml.py`, `test_bootstrap_yaml.py`, `test_run_yaml.py`, `test_symlink_yaml.py`, `test_unsloth_yaml.py`).
-- Materialization tests (`test_files_yaml.py`) validating file descriptors, syntax, and schema contents.
-- Config/data tests (`test_config.py`, `test_config_newshape.py`, `test_data.py`).
-- CLI and trainer smoke tests (`test_cli.py`, `test_trainer_smoke.py`).
-- Self-play module tests (`test_selfplay.py`, `test_training_selfplay.py`).
-- Reward/sandbox/tool tests (`test_azr_rewards.py`, `test_rewards.py`, `test_tool_harness.py`, `test_python_tool.py`, `test_tool_loop.py`, `test_sandbox_web.py`, `test_web_tool.py`, `test_schema.py`).
+### 2.1 Model and configuration
 
-## Miscellaneous
-- `azr.egg-info/` – Packaging metadata emitted by `pip install -e .`.
-- `.git`, `.gitignore`, `.pytest_cache/` – Git and pytest state.
-- `logs/`, `outputs/`, `tmp_sb/`, `tmp_config*` – Sample run outputs and temporary configs.
+·      **config.py** defines dataclasses for configuration objects. AzrModelCfg stores LoRA rank, alpha, quantisation and target modules. AzrCfg aggregates model, RLHF, thinking, self‑play, teacher, data and logging sections.
 
-## Key Interactions
-1. CLI loads configuration (`azr.config`) and selects appropriate trainer (`azr.training` vs `azr.training_selfplay`), optionally managing vLLM via `azr.vllm_launcher`.
-2. Trainers load models/tokenizers (`azr.modeling`), construct datasets (`azr.data`), and compute rewards (`azr.rewards`, `tool_harness.py`).
-3. Self-play flows rely on `SelfPlayManager` for opponent completions, teacher hints, and LoRA updates; telemetry flows through `generation_logger`, `failure_logger`, and `scoreboard` helpers.
-4. Tool dispatch uses `azr.tool_loop` guards and sandbox runners (`tool_harness.py`, `azr/tools/python_tool.py`, `azr/tools/web.py`) described in `SPEC_FUNCTIONS.md`.
-5. Automation YAMLs plus scripts in `scripts/` deliver bootstrap + validation workflows matching test expectations.
+·      **modeling.py** loads a causal language model and applies LoRA adapters. It optionally quantises the model to 4‑bit via BitsAndBytesConfig. Target modules default to q\_proj and v\_proj but can be overridden by the configuration[\[2\]](https://github.com/justdtip/self-directed-training/blob/main/azr/modeling.py#L58-L63). After loading LoRA, it calls get\_peft\_model and returns the model[\[3\]](https://github.com/justdtip/self-directed-training/blob/main/azr/modeling.py#L62-L75).
 
+·      **adapters.py** is not present in the repository; therefore the LoRA+MLP adapters described in the user‑provided summary are not yet implemented. LoRA is applied only to specified projection matrices via the PEFT library.
+
+·      **data.py** defines a TaskExample dataclass and functions to load JSONL tasks. Each example includes a prompt, unit tests, timeouts and memory limits.
+
+### 2.2 Prompt and assist helpers
+
+*   **prompts\_assist.py** defines a strict **system prompt** requiring the model to return exactly one fenced Python code block followed by a Final answer: line[\[4\]](https://github.com/justdtip/self-directed-training/blob/main/azr/prompts_assist.py#L8-L34). It also contains functions build\_assist\_messages and build\_retry\_messages to construct teacher hints and retry prompts. Hints must avoid code and the Final answer: prefix; non‑ASCII characters are stripped and truncated.
+*   **cli.py** provides a Click‑based command‑line interface. The train command loads the configuration, chooses between standard RLHF and self‑play training, manages LoRA checkpoints and logging, and launches a vLLM sidecar when tool‑loop training is enabled.
+
+### 2.3 Training modules
+
+*   **training.py** builds a GRPOTrainer for standard RLHF. It loads tasks, sets up LoRA via setup\_model, creates a PromptDataset and defines a reward function. Parameter counts are printed so users can confirm which modules are trainable[\[5\]](https://github.com/justdtip/self-directed-training/blob/main/azr/training.py#L86-L114).
+*   **training\_selfplay.py** orchestrates the self‑play training loop. Key steps include:
+*   **Model setup:** The script reads the configuration, loads the base model via setup\_model, freezes base parameters, and enables input gradients before enabling gradient checkpointing[\[6\]](https://github.com/justdtip/self-directed-training/blob/main/azr/training_selfplay.py#L137-L181).
+
+·      **Prompt dataset:** A PromptDataset renders tasks using the system prompt and optionally inserts hidden reasoning inside <think> tags when policy\_enable\_thinking or opponent\_enable\_thinking are true in the configuration[\[1\]](https://github.com/justdtip/self-directed-training/blob/4ea23857338a801704ea0d9d518a135c2343c021/azr/config.json#L26-L37).
+
+·      **Self‑play loop:** For each batch, the policy model generates a completion with hidden reasoning tokens and returns a code solution. The reward function reward\_fn calls blended\_reward from rewards.py to score code execution and formatting; if self‑play is enabled, it also queries a remote opponent via SelfPlayManager, compares scores and adds a self‑play component (weight controlled by self\_play.weight). The reward function handles teacher hints and retry logic—calling the teacher on unsolved or opponent‑only cases and retraining if the hint leads to a correct solution[\[7\]](https://github.com/justdtip/self-directed-training/blob/main/azr/training_selfplay.py#L402-L515).
+
+*   **Logging and scoreboard:** The script logs all generations (policy, opponent, teacher) to JSONL, updates the scoreboard via scoreboard.update\_batch and writes results at the end of training.
+*   **selfplay\_manager.py** manages remote interactions. It instantiates a remote client (Together AI or OpenAI) from configuration, enforces concurrency limits, tracks token usage and provides generate\_opponent and teacher\_hint methods. The opponent is always called using the **original user question** rather than the policy’s prompt, ensuring outputs are not truncated and self‑play scores are fair.
+*   **rewards.py** implements reward functions. It validates that completions contain one code block and a final answer line[\[8\]](https://github.com/justdtip/self-directed-training/blob/main/azr/rewards.py#L12-L28), extracts the last code block[\[9\]](https://github.com/justdtip/self-directed-training/blob/main/azr/rewards.py#L30-L58), executes it in a sandbox, and blends the pass/fail signal with formatting penalties and self‑play scores. The blended reward encourages concise, correct solutions and punishes format violations.
+*   **scoreboard.py** maintains a thread‑safe scoreboard recording counts of tasks solved by the policy, solved by the opponent, solved by both, or solved by neither. When writing results it computes pass rates and Wilson confidence intervals[\[10\]](https://github.com/justdtip/self-directed-training/blob/main/azr/scoreboard.py#L14-L28)[\[11\]](https://github.com/justdtip/self-directed-training/blob/main/azr/scoreboard.py#L76-L125).
+*   **logging\_io.py****,** **generation\_logger.py****,** **failure\_logger.py** implement asynchronous JSONL and plain‑text logging. They ensure logs are flushed even if the run crashes.
+*   **codegate.py** checks that Python code blocks meet the required signature and uses nsjail or local execution to sandbox user code. It is called by rewards.py.
+
+### 2.4 Remote providers and tool loop
+
+*   **openai\_provider.py** and **opponent\_provider\_together.py** define asynchronous clients for remote models (OpenAI or Together AI). They build request payloads, handle timeouts and concurrency, and return completions or hints.
+*   **tool\_loop.py** implements a tool‑calling agent that can call functions or the web during training. It is not used in the current self‑play pipeline but is used by collect\_rollouts.py to generate transcripts for unsloth training.
+
+## 3\. Training workflow
+
+1.  **Configuration:** The primary configuration file azr/config.json sets LoRA parameters (lora\_r, lora\_alpha, target modules), quantisation and device map. The thinking section controls hidden‑reasoning budgets and enables thinking for both policy and opponent models[\[1\]](https://github.com/justdtip/self-directed-training/blob/4ea23857338a801704ea0d9d518a135c2343c021/azr/config.json#L26-L37). The self\_play section enables self‑play and defines the opponent provider (e.g., Together AI with a specific model, concurrency and sampling temperature). The teacher block configures the teacher (e.g., OpenAI GPT‑5) and hint termination conditions; teacher\_assist defines when hints are sampled and the maximum hint length. This file is passed to azr/cli.py and training scripts.
+2.  **Invocation:** Running python -m azr.cli train --config azr/config.json loads the configuration, sets seeds and logging. The CLI chooses between standard RLHF (training.py) and self‑play RLHF (training\_selfplay.py) based on the presence of the self\_play.enabled flag.
+3.  **Model and dataset setup:** build\_trainer (in training.py or training\_selfplay.py) loads the base model via modeling.setup\_model, applies LoRA adapters, optionally prepares the model for k‑bit training, and loads the training data using data.load\_jsonl. For self‑play, gradient checkpointing is enabled after calling model.enable\_input\_require\_grads() to ensure at least one tensor has requires\_grad=True[\[6\]](https://github.com/justdtip/self-directed-training/blob/main/azr/training_selfplay.py#L137-L181).
+4.  **Self‑play loop:** For each batch of prompts, the trainer calls the policy model to generate a code solution. If self‑play is enabled, the SelfPlayManager queries the opponent using the original prompt (with extended token budget) and obtains an answer. The reward function reward\_fn calls rewards.blended\_reward on the policy output and the opponent output; it may also call the teacher to generate a hint and perform a retry if the task is unsolved by both or solved only by the opponent[\[7\]](https://github.com/justdtip/self-directed-training/blob/main/azr/training_selfplay.py#L402-L515).
+5.  **Optimisation:** Rewards from the policy, opponent and teacher are combined into a final loss. LoRA parameters are updated via the GRPO trainer (or unsloth’s trainer for sft\_train.py). Base model weights remain frozen; only LoRA adapters are trainable.
+6.  **Logging and evaluation:** All generations are logged to trainer\_output/generations.\*.jsonl with metadata (prompt, completion, scores, thinking tokens). The scoreboard is updated after each batch and written at the end of training. Test scripts and CI workflows run smoke tests and check for formatting, concurrency and remote API errors.
+
+## 4\. Gaps and blindspots relative to the provided overview
+
+The user’s initial summary proposed new modules and behaviours not present in the repository. This audit clarifies the following points:
+
+1.  **No** **azr/adapters.py** **and no LoRA+MLP adapters:** The repository has not implemented non‑linear adapters or attach\_mlp\_adapters; LoRA is applied only to projection matrices via the PEFT library. The _target modules_ list is configurable, but there is no adapter injection logic beyond standard LoRA.
+2.  **No** **train\_model.py****:** Model loading occurs in modeling.py and training\_selfplay.py; there is no file named train\_model.py. The earlier summary incorrectly referenced such a file.
+3.  **Hidden‑reasoning budgets:** The configuration file includes budgets for policy\_budget\_tokens, opponent\_budget\_tokens and teacher\_budget\_tokens, and flags policy\_enable\_thinking and opponent\_enable\_thinking[\[1\]](https://github.com/justdtip/self-directed-training/blob/4ea23857338a801704ea0d9d518a135c2343c021/azr/config.json#L26-L37). These budgets control the number of tokens allowed for thinking segments and must be large enough to cover the hidden reasoning and final answers.
+4.  **Opponent prompt construction:** training\_selfplay.py rebuilds the opponent prompt from the original user question rather than using the policy’s templated prompt. This ensures the opponent output is not truncated and yields non‑zero wins. The earlier summary mentioned this fix but failed to highlight that it is implemented in the repository.
+5.  **LoRA parameter freezing and gradient checkpointing:** After loading LoRA, the code calls model.enable\_input\_require\_grads() and model.gradient\_checkpointing\_enable()[\[6\]](https://github.com/justdtip/self-directed-training/blob/main/azr/training_selfplay.py#L137-L181). Warnings about requires\_grad=False are resolved by ensuring at least one input requires gradients, and caches are disabled during generation.
+6.  **Improved scoreboard:** scoreboard.py pads and truncates pass flag lists to match batch size and writes results in a finally block to prevent missing entries[\[10\]](https://github.com/justdtip/self-directed-training/blob/main/azr/scoreboard.py#L14-L28)[\[11\]](https://github.com/justdtip/self-directed-training/blob/main/azr/scoreboard.py#L76-L125).
+
+## 5\. Proposed enhancements (based on user’s outline)
+
+The user’s outline proposes adding **LoRA+MLP adapters** and other capacity boosters. To implement these changes:
+
+·      A new module azr/adapters.py would need to define LoRAMLPAdapter and attach\_mlp\_adapters functions that wrap selected linear layers (e.g., q\_proj, k\_proj, v\_proj, o\_proj, down\_proj) with small MLPs providing non‑linear, input‑conditioned residuals. The configuration would include an adapters section specifying ranks, alpha, multiplicative factors and dropout. These adapters should co‑exist with LoRA and maintain compatibility with 4‑bit quantisation.
+
+·      modeling.py would be extended to load MLP adapters based on the configuration and freeze/unfreeze appropriate parameters. Gradient checkpointing should still be enabled only after calling model.enable\_input\_require\_grads().
+
+·      The reward function and self‑play logic would remain unchanged, but additional metrics could track the effect of adapters.
+
+The rollout plan suggests starting with LoRA+MLP adapters and gating modules (P1), then exploring prefix prompts, attention biases and micro‑experts if capacity plateaus (P2/P3). Implementing these enhancements would require careful integration and testing to avoid breaking the existing pipeline.
+
+## 6\. Coding guidance and best practices
+
+·      **Parameter freezing:** Never modify base model parameters directly. Use peft.get\_peft\_model to apply LoRA and freeze the original weights. Unfreeze only LoRA (and any future adapter) parameters.
+
+·      **Enable input grads before gradient checkpointing:** Always call model.enable\_input\_require\_grads() before model.gradient\_checkpointing\_enable()[\[6\]](https://github.com/justdtip/self-directed-training/blob/main/azr/training_selfplay.py#L137-L181).
+
+·      **Avoid** **use\_cache=True** **during training:** Caches are disabled when gradient checkpointing is enabled; passing use\_cache=True will be ignored and may produce warnings.
+
+·      **Prompt construction:** Always use the original user prompt for opponent calls and include the system prompt via format\_system\_prompt() from prompts\_assist.py to ensure the correct format.
+
+·      **Teacher hints:** Sanitise hints by removing Final answer: prefixes, stripping non‑ASCII characters and truncating to the configured maximum length. Hints should be concise and avoid providing code blocks.
+
+·      **Scoreboard consistency:** Ensure policy and opponent pass flags lists are padded/truncated to match batch sizes. Always write the scoreboard in a finally block to persist results even if training is interrupted[\[10\]](https://github.com/justdtip/self-directed-training/blob/main/azr/scoreboard.py#L14-L28)[\[11\]](https://github.com/justdtip/self-directed-training/blob/main/azr/scoreboard.py#L76-L125).
+
+·      **Testing:** Run smoke tests after adding new modules to ensure the pipeline still executes end‑to‑end, the scoreboard updates correctly and there are no warnings or crashes.
+
+## 7\. Conclusion
+
+The self‑directed‑training repository implements a sophisticated RLHF framework combining LoRA fine‑tuning, self‑play against a remote opponent and teacher‑assisted retries. The current codebase supports hidden reasoning via <think> tags and includes robust logging, scoreboard tracking and remote client management. The proposed LoRA+MLP adapters described in the user’s outline are not yet implemented, but the modular structure of the repository makes it feasible to add them. By following the coding guidance and rollout plan summarised above, engineers can extend the system without breaking existing functionality.
+
+* * *
+
+[\[1\]](https://github.com/justdtip/self-directed-training/blob/4ea23857338a801704ea0d9d518a135c2343c021/azr/config.json#L26-L37) config.json
+
+[https://github.com/justdtip/self-directed-training/blob/4ea23857338a801704ea0d9d518a135c2343c021/azr/config.json](https://github.com/justdtip/self-directed-training/blob/4ea23857338a801704ea0d9d518a135c2343c021/azr/config.json)
+
+[\[2\]](https://github.com/justdtip/self-directed-training/blob/main/azr/modeling.py#L58-L63) [\[3\]](https://github.com/justdtip/self-directed-training/blob/main/azr/modeling.py#L62-L75) modeling.py
+
+[https://github.com/justdtip/self-directed-training/blob/main/azr/modeling.py](https://github.com/justdtip/self-directed-training/blob/main/azr/modeling.py)
+
+[\[4\]](https://github.com/justdtip/self-directed-training/blob/main/azr/prompts_assist.py#L8-L34) prompts\_assist.py
+
+[https://github.com/justdtip/self-directed-training/blob/main/azr/prompts\_assist.py](https://github.com/justdtip/self-directed-training/blob/main/azr/prompts_assist.py)
+
+[\[5\]](https://github.com/justdtip/self-directed-training/blob/main/azr/training.py#L86-L114) training.py
+
+[https://github.com/justdtip/self-directed-training/blob/main/azr/training.py](https://github.com/justdtip/self-directed-training/blob/main/azr/training.py)
+
+[\[6\]](https://github.com/justdtip/self-directed-training/blob/main/azr/training_selfplay.py#L137-L181) [\[7\]](https://github.com/justdtip/self-directed-training/blob/main/azr/training_selfplay.py#L402-L515) training\_selfplay.py
+
+[https://github.com/justdtip/self-directed-training/blob/main/azr/training\_selfplay.py](https://github.com/justdtip/self-directed-training/blob/main/azr/training_selfplay.py)
+
+[\[8\]](https://github.com/justdtip/self-directed-training/blob/main/azr/rewards.py#L12-L28) [\[9\]](https://github.com/justdtip/self-directed-training/blob/main/azr/rewards.py#L30-L58) rewards.py
+
+[https://github.com/justdtip/self-directed-training/blob/main/azr/rewards.py](https://github.com/justdtip/self-directed-training/blob/main/azr/rewards.py)
+
+[\[10\]](https://github.com/justdtip/self-directed-training/blob/main/azr/scoreboard.py#L14-L28) [\[11\]](https://github.com/justdtip/self-directed-training/blob/main/azr/scoreboard.py#L76-L125) scoreboard.py
+
+[https://github.com/justdtip/self-directed-training/blob/main/azr/scoreboard.py](https://github.com/justdtip/self-directed-training/blob/main/azr/scoreboard.py)

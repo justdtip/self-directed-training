@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import Iterable, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 import torch
 
 from .config import AzrModelCfg
 from .utils import console
+from .adapters import attach_ia3_gates
 
 
 def load_tokenizer(model_id: str):
@@ -24,6 +25,7 @@ def setup_model(
     *,
     bf16: bool = False,
     target_modules: Optional[Iterable[str]] = None,
+    ia3_cfg: Optional[Mapping[str, Any]] = None,
 ) -> object:
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -72,4 +74,11 @@ def setup_model(
     # After adding LoRA adapters, cast the whole model to bfloat16 to avoid dtype mismatches (e.g., lm_head stays float32).
     if bf16:
         model = model.to(dtype=torch.bfloat16)
+
+    if ia3_cfg and ia3_cfg.get("enabled"):
+        attach_ia3_gates(model, float(ia3_cfg.get("init_value", 1.0)))
+        for name, param in model.named_parameters():
+            trainable = ("lora" in name) or ("ia3_gate" in name)
+            param.requires_grad = trainable
+
     return model

@@ -129,7 +129,11 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             console.print(f"[yellow]bf16 requested but {reason}; defaulting to float32.[/]")
         except Exception:
             pass
-    model = setup_model(model_cfg, bf16=bf16_flag)
+    model = setup_model(
+        model_cfg,
+        bf16=bf16_flag,
+        ia3_cfg=cfg_map.get("ia3"),
+    )
 
     # Disable KV caching when gradient checkpointing is enabled later.
     model_config = getattr(model, "config", None)
@@ -140,7 +144,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     named_params = getattr(model, "named_parameters", None)
     if callable(named_params):
         for name, param in named_params():
-            if any(tag in name for tag in ("lora_", "loraA", "loraB")):
+            if any(tag in name for tag in ("lora_", "loraA", "loraB", "ia3_gate")):
                 param.requires_grad = True
             else:
                 param.requires_grad = False
@@ -182,8 +186,11 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     total_params = 0
     trainable_params = 0
     per_lora_module: Dict[str, int] = {}
+    ia3_total = 0
+    ia3_per_module: Dict[str, int] = {}
     if callable(named_params):
         lora_targets = tuple(getattr(model_cfg, "lora_target_modules", ()) or ())
+        ia3_targets = ("q_proj", "k_proj", "v_proj", "o_proj")
         for name, param in named_params():
             if not hasattr(param, "numel"):
                 continue
@@ -196,14 +203,24 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                         if target and target in name:
                             per_lora_module[target] = per_lora_module.get(target, 0) + count
                             break
+                elif "ia3_gate" in name:
+                    ia3_total += count
+                    for target in ia3_targets:
+                        if target in name:
+                            ia3_per_module[target] = ia3_per_module.get(target, 0) + count
+                            break
     if total_params:
         pct = (trainable_params / total_params) * 100.0
         print(
-            f"[LoRA] Trainable parameters: {trainable_params:,} / {total_params:,} ({pct:.2f}% trainable)"
+            f"[Adapters] Trainable parameters: {trainable_params:,} / {total_params:,} ({pct:.2f}% trainable)"
         )
     if per_lora_module:
         for module_name, count in sorted(per_lora_module.items()):
             print(f"[LoRA]   {module_name}: {count:,} trainable params")
+    if ia3_total:
+        print(f"[IA3] Trainable parameters: {ia3_total:,}")
+        for module_name, count in sorted(ia3_per_module.items()):
+            print(f"[IA3]   {module_name}: {count:,} trainable params")
 
     max_prompt_len = int(rlhf_cfg["max_prompt_length"])
     base_completion_len = int(rlhf_cfg["max_completion_length"])

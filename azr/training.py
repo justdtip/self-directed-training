@@ -99,7 +99,11 @@ def build_trainer(
         raise ValueError("model.model_id must be specified in the configuration")
 
     tokenizer = load_tokenizer(model_cfg.model_id)
-    model = setup_model(model_cfg, bf16=bool(rlhf_cfg["bf16"]))
+    model = setup_model(
+        model_cfg,
+        bf16=bool(rlhf_cfg["bf16"]),
+        ia3_cfg=config.get("ia3"),
+    )
 
     # Debug information about parameters to confirm LoRA wiring
     try:
