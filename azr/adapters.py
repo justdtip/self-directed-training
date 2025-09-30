@@ -134,7 +134,7 @@ class AttentionLogitGate(nn.Module):
         *,
         per_head: bool,
         shared: bool = False,
-        init_value: float = 1.0,
+        init_value: float = 0.0,
         target: str = "query",
     ) -> None:
         super().__init__()
@@ -144,16 +144,18 @@ class AttentionLogitGate(nn.Module):
         self.shared = shared
         self.target = target
         size = 1 if shared or not per_head else num_heads
-        self.scale = nn.Parameter(torch.full((size,), float(init_value), dtype=torch.float32))
+        self.log_temp = nn.Parameter(
+            torch.full((size,), float(init_value), dtype=torch.float32)
+        )
         self.warmup_alpha: float = 1.0
 
     def set_warmup_alpha(self, alpha: float) -> None:
         self.warmup_alpha = float(alpha)
 
     def _effective_scale(self, device: torch.device) -> torch.Tensor:
-        scale = self.scale
-        if scale.device != device:
-            scale = scale.to(device)
+        scale = torch.exp(self.log_temp)
+        scale = torch.clamp(scale, 0.5, 2.0)
+        scale = _maybe_to(scale, device)
         if self.warmup_alpha != 1.0:
             scale = scale * self.warmup_alpha
         return scale
@@ -196,7 +198,14 @@ class RoPEScale(nn.Module):
 
     def __init__(self, init_value: float = 1.0) -> None:
         super().__init__()
-        self.scale = nn.Parameter(torch.tensor(float(init_value), dtype=torch.float32))
+        if init_value <= 0:
+            init_value = 1.0
+        self.log_scale = nn.Parameter(torch.tensor(float(init_value)).log())
+
+    @property
+    def scale(self) -> torch.Tensor:
+        raw = torch.exp(self.log_scale)
+        return torch.clamp(raw, 0.5, 2.0)
 
     def forward(self, cos: torch.Tensor, sin: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         scale = _maybe_to(self.scale, cos.device)
@@ -342,6 +351,16 @@ def _wrap_attention_function(fn):
         return fn
 
     def wrapped(module, query, key, value, attention_mask, scaling, dropout=0.0, **kwargs):
+        rope_module = getattr(module, "rope_scale", None)
+        if rope_module is None:
+            rope_module = getattr(module, "_shared_rope_scale", None)
+        if rope_module is not None:
+            scale = rope_module.scale
+            scale = _maybe_to(scale, query.device)
+            query = query * scale.view(1, 1, 1, 1)
+            if key is not None:
+                key = key * scale.view(1, 1, 1, 1)
+
         gate: AttentionLogitGate | None = getattr(module, "logit_gate", None)
         if gate is not None:
             query, key = gate.modulate(query, key)
@@ -515,7 +534,12 @@ def _iter_decoder_layers(model: nn.Module) -> list[nn.Module]:
     return []
 
 
-def attach_residual_gates(model: nn.Module, init_value: float = 1.0) -> None:
+def attach_residual_gates(
+    model: nn.Module,
+    init_value: float = 1.0,
+    *,
+    post_ffn: bool = False,
+) -> None:
     """Attach per-layer residual stream gates to decoder layers."""
 
     layers = _iter_decoder_layers(model)
@@ -537,14 +561,43 @@ def attach_residual_gates(model: nn.Module, init_value: float = 1.0) -> None:
         mlp_mod = getattr(layer, "mlp", None)
         if attn_mod is None or mlp_mod is None:
             continue
-        if hasattr(layer, "attn_residual_gate") or hasattr(layer, "ffn_residual_gate"):
-            continue
+        gate_attn = getattr(layer, "attn_residual_gate", None)
+        gate_ffn = getattr(layer, "ffn_residual_gate", None)
 
-        gate_attn = ResidualStreamGate(hidden_dim, init_value)
-        gate_ffn = ResidualStreamGate(hidden_dim, init_value)
+        if gate_attn is None:
+            gate_attn = ResidualStreamGate(hidden_dim, init_value)
+            original_attn_forward = attn_mod.forward
 
-        original_attn_forward = attn_mod.forward
-        original_mlp_forward = mlp_mod.forward
+            def gated_attn_forward(*args, __orig=original_attn_forward, __gate=gate_attn, **kwargs):
+                output = __orig(*args, **kwargs)
+                if isinstance(output, tuple):
+                    if not output:
+                        return output
+                    attn_out = __gate(output[0])
+                    return (attn_out, *output[1:])
+                return __gate(output)
+
+            attn_mod.forward = gated_attn_forward  # type: ignore[assignment]
+            layer.add_module("attn_residual_gate", gate_attn)
+
+        if post_ffn:
+            if gate_ffn is None:
+                gate_ffn = ResidualStreamGate(hidden_dim, init_value)
+                original_mlp_forward = mlp_mod.forward
+
+                def gated_mlp_forward(*args, __orig=original_mlp_forward, __gate=gate_ffn, **kwargs):
+                    output = __orig(*args, **kwargs)
+                    if isinstance(output, tuple):
+                        if not output:
+                            return output
+                        ffn_out = __gate(output[0])
+                        return (ffn_out, *output[1:])
+                    return __gate(output)
+
+                mlp_mod.forward = gated_mlp_forward  # type: ignore[assignment]
+                layer.add_module("ffn_residual_gate", gate_ffn)
+        elif gate_ffn is not None:
+            delattr(layer, "ffn_residual_gate")
 
         def gated_attn_forward(*args, __orig=original_attn_forward, __gate=gate_attn, **kwargs):
             output = __orig(*args, **kwargs)
@@ -557,6 +610,8 @@ def attach_residual_gates(model: nn.Module, init_value: float = 1.0) -> None:
 
         def gated_mlp_forward(*args, __orig=original_mlp_forward, __gate=gate_ffn, **kwargs):
             output = __orig(*args, **kwargs)
+            if __gate is None:
+                return output
             if isinstance(output, tuple):
                 if not output:
                     return output
@@ -567,7 +622,8 @@ def attach_residual_gates(model: nn.Module, init_value: float = 1.0) -> None:
         attn_mod.forward = gated_attn_forward  # type: ignore[assignment]
         mlp_mod.forward = gated_mlp_forward  # type: ignore[assignment]
         layer.add_module("attn_residual_gate", gate_attn)
-        layer.add_module("ffn_residual_gate", gate_ffn)
+        if gate_ffn is not None:
+            layer.add_module("ffn_residual_gate", gate_ffn)
 
 
 def _wrap_rotary_embedding(rotary_module: nn.Module, init_value: float) -> None:
@@ -594,15 +650,24 @@ def attach_rope_scale(
 
     layers = _iter_decoder_layers(model)
 
-    if per_layer and layers:
-        for layer in layers:
-            rotary = getattr(getattr(layer, "self_attn", None), "rotary_emb", None)
-            if rotary is None:
+    attention_modules: list[nn.Module] = []
+    for module in model.modules():
+        if hasattr(module, "q_proj") and hasattr(module, "head_dim"):
+            attention_modules.append(module)
+
+    if per_layer and attention_modules:
+        for attn in attention_modules:
+            if hasattr(attn, "rope_scale"):
                 continue
-            _wrap_rotary_embedding(rotary, init_value)
+            attn.add_module("rope_scale", RoPEScale(init_value))
         return
 
-    for module in model.modules():
-        if module.__class__.__name__.lower().endswith("rotaryembedding"):
-            _wrap_rotary_embedding(module, init_value)
-            break
+    shared = RoPEScale(init_value)
+    name = "rope_scale_shared"
+    index = 0
+    while hasattr(model, name):
+        index += 1
+        name = f"rope_scale_shared_{index}"
+    model.add_module(name, shared)
+    for attn in attention_modules:
+        setattr(attn, "_shared_rope_scale", shared)

@@ -193,10 +193,13 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     "ia3_head_gate",
                     "channel_gate",
                     "logit_gate",
-                    "residual_gate",
+                    "attn_residual_gate",
+                    "ffn_residual_gate",
                     "projection_gate",
                     "rope_scale",
                     "input_projection_gate",
+                    "layernorm.weight",
+                    "norm.weight",
                 )
             ):
                 param.requires_grad = True
@@ -249,6 +252,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     residual_gate_total = 0
     projection_gate_total = 0
     rope_scale_total = 0
+    layernorm_gamma_total = 0
     if callable(named_params):
         lora_targets = tuple(getattr(model_cfg, "lora_target_modules", ()) or ())
         ia3_targets = ("q_proj", "k_proj", "v_proj", "o_proj")
@@ -290,6 +294,8 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     projection_gate_total += count
                 elif "rope_scale" in name:
                     rope_scale_total += count
+                elif "norm.weight" in name:
+                    layernorm_gamma_total += count
     if total_params:
         pct = (trainable_params / total_params) * 100.0
         print(
@@ -317,6 +323,8 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         print(f"[ProjDim] Trainable parameters: {projection_gate_total:,}")
     if rope_scale_total:
         print(f"[RoPEScale] Trainable parameters: {rope_scale_total:,}")
+    if layernorm_gamma_total:
+        print(f"[LayerNorm] Trainable parameters: {layernorm_gamma_total:,}")
 
     max_prompt_len = int(rlhf_cfg["max_prompt_length"])
     base_completion_len = int(rlhf_cfg["max_completion_length"])

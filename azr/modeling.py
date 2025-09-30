@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 from typing import Any, Iterable, Mapping, Optional
+import math
 
 import torch
+import torch.nn as nn
 
 from .config import AzrModelCfg
 from .utils import console
@@ -122,16 +124,20 @@ def setup_model(
 
         attn_cfg = ia3_cfg.get("attention_logit_gates")
         if attn_cfg and attn_cfg.get("enabled"):
-            per_head = bool(attn_cfg.get("per_head", False))
+            per_head = bool(attn_cfg.get("per_head", True))
             per_layer = bool(attn_cfg.get("per_layer", True))
             shared = bool(attn_cfg.get("shared", False))
             target = attn_cfg.get("target", "query")
+            init_scale = float(attn_cfg.get("init_value", 1.0))
+            if init_scale <= 0:
+                init_scale = 1.0
+            init_log = math.log(init_scale)
             attach_attention_logit_gates(
                 model,
                 per_head=per_head,
                 per_layer=per_layer,
                 shared=shared,
-                init_value=float(attn_cfg.get("init_value", 1.0)),
+                init_value=init_log,
                 target=target,
             )
             trainable_markers.append("logit_gate")
@@ -152,15 +158,27 @@ def setup_model(
         if rope_cfg and rope_cfg.get("enabled"):
             attach_rope_scale(
                 model,
-                per_layer=bool(rope_cfg.get("per_layer", False)),
+                per_layer=bool(rope_cfg.get("per_layer", True)),
                 init_value=float(rope_cfg.get("init_value", 1.0)),
             )
             trainable_markers.append("rope_scale")
 
         res_cfg = ia3_cfg.get("residual_gates")
         if res_cfg and res_cfg.get("enabled"):
-            attach_residual_gates(model, float(res_cfg.get("init_value", 1.0)))
-            trainable_markers.append("residual_gate")
+            attach_residual_gates(
+                model,
+                float(res_cfg.get("init_value", 1.0)),
+                post_ffn=bool(res_cfg.get("post_ffn", False)),
+            )
+            trainable_markers.append("attn_residual_gate")
+            if res_cfg.get("post_ffn", False):
+                trainable_markers.append("ffn_residual_gate")
+
+        ln_cfg = ia3_cfg.get("layernorm_gamma")
+        use_ln_gamma = bool(ln_cfg and ln_cfg.get("enabled"))
+        if use_ln_gamma:
+            enable_layernorm_scale_fit(model)
+            trainable_markers.extend(["layernorm.weight", "norm.weight"])
 
     markers = tuple(dict.fromkeys(trainable_markers))
     for name, param in model.named_parameters():
@@ -168,3 +186,11 @@ def setup_model(
         param.requires_grad = trainable
 
     return model
+def enable_layernorm_scale_fit(model: nn.Module) -> None:
+    """Unfreeze LayerNorm/RMSNorm scale parameters."""
+
+    for module in model.modules():
+        if isinstance(module, nn.LayerNorm) or "rmsnorm" in module.__class__.__name__.lower():
+            weight = getattr(module, "weight", None)
+            if weight is not None:
+                weight.requires_grad = True

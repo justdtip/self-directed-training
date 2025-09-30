@@ -16,8 +16,8 @@
     "kl_coeff": 0.0,
     "bf16": false,
     "gradient_accumulation_steps": 8,
-    "temperature": 0.9,
-    "top_p": 0.92,
+    "temperature": 0.3,
+    "top_p": 0.5,
     "retry_temperature": 0.2
   },
   "ia3": {
@@ -26,13 +26,13 @@
     "per_layer_head_gates": true,
     "ffn_channel_gates": {
       "enabled": true,
-      "group_size": 16,
+      "group_size": 8,
       "target": "gate_proj",
       "init_value": 1.0
     },
     "attention_logit_gates": {
       "enabled": true,
-      "per_head": false,
+      "per_head": true,
       "per_layer": true,
       "shared": false,
       "target": "query",
@@ -41,7 +41,8 @@
     },
     "residual_gates": {
       "enabled": true,
-      "init_value": 1.0
+      "init_value": 1.0,
+      "post_ffn": true
     },
     "projection_dim_gates": {
       "enabled": true,
@@ -52,6 +53,9 @@
       "enabled": true,
       "per_layer": true,
       "init_value": 1.0
+    },
+    "layernorm_gamma": {
+      "enabled": true
     }
   },
   "penalties": {
