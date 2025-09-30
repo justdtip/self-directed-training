@@ -131,6 +131,80 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             pass
     model = setup_model(model_cfg, bf16=bf16_flag)
 
+    # Disable KV caching when gradient checkpointing is enabled later.
+    model_config = getattr(model, "config", None)
+    if model_config is not None and getattr(model_config, "use_cache", None):
+        model_config.use_cache = False
+
+    # Freeze the base model weights and leave only LoRA adapters trainable.
+    named_params = getattr(model, "named_parameters", None)
+    if callable(named_params):
+        for name, param in named_params():
+            if any(tag in name for tag in ("lora_", "loraA", "loraB")):
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
+
+    # Gradient checkpointing requires inputs/embeddings to retain gradients.
+    embedding_layer = None
+    try:
+        model.enable_input_require_grads()
+    except AttributeError:
+        embeddings = getattr(model, "get_input_embeddings", None)
+        if callable(embeddings):
+            embedding_layer = embeddings()
+            if embedding_layer is not None and hasattr(embedding_layer, "weight"):
+                embedding_layer.weight.requires_grad = True
+    else:
+        embeddings = getattr(model, "get_input_embeddings", None)
+        if callable(embeddings):
+            embedding_layer = embeddings()
+
+    if embedding_layer is not None:
+        def _set_input_requires_grad(module, inputs, output):
+            if isinstance(output, torch.Tensor):
+                output.requires_grad_(True)
+
+        handle = embedding_layer.register_forward_hook(_set_input_requires_grad)
+        setattr(model, "_input_grad_hook", handle)
+
+    # Enable gradient checkpointing after gradients are wired up.
+    if hasattr(model, "gradient_checkpointing_enable"):
+        try:
+            model.gradient_checkpointing_enable()
+        except TypeError:
+            try:
+                model.gradient_checkpointing_enable(use_reentrant=False)
+            except TypeError:
+                pass
+
+    # Summarise parameter counts for visibility.
+    total_params = 0
+    trainable_params = 0
+    per_lora_module: Dict[str, int] = {}
+    if callable(named_params):
+        lora_targets = tuple(getattr(model_cfg, "lora_target_modules", ()) or ())
+        for name, param in named_params():
+            if not hasattr(param, "numel"):
+                continue
+            count = param.numel()
+            total_params += count
+            if param.requires_grad:
+                trainable_params += count
+                if "lora" in name:
+                    for target in lora_targets:
+                        if target and target in name:
+                            per_lora_module[target] = per_lora_module.get(target, 0) + count
+                            break
+    if total_params:
+        pct = (trainable_params / total_params) * 100.0
+        print(
+            f"[LoRA] Trainable parameters: {trainable_params:,} / {total_params:,} ({pct:.2f}% trainable)"
+        )
+    if per_lora_module:
+        for module_name, count in sorted(per_lora_module.items()):
+            print(f"[LoRA]   {module_name}: {count:,} trainable params")
+
     max_prompt_len = int(rlhf_cfg["max_prompt_length"])
     base_completion_len = int(rlhf_cfg["max_completion_length"])
     thinking_cfg = cfg_map.get("thinking", {}) or {}
@@ -673,7 +747,6 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                                     do_sample=True,
                                     temperature=retry_temp,
                                     top_p=float(rlhf_cfg["top_p"]),
-                                    use_cache=True,
                                 )
                                 retry_text = tokenizer.decode(gen_ids[0], skip_special_tokens=True)
                                 attempts_used = gate_attempt + 1
@@ -729,7 +802,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                                     "source": "assist",
                                     "step": step_id,
                                     "prompt": prompt_log_value,
-                                    "hint": hint,
+                                    "hint": hint_clean,
                                     "retry": retry_text,
                                     "score": retry_score,
                                     "passed": policy_pass_flags[idx],

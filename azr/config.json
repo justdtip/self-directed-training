@@ -29,7 +29,7 @@
     "tag_close": "</think>",
     "strip_for_reward": true,
     "policy_budget_tokens": 2048,
-    "opponent_budget_tokens": 2048,
+    "opponent_budget_tokens": 3072,
     "opponent_budget_note": "Ensure rlhf.max_completion_length + opponent_budget_tokens covers thinking + answer",
     "teacher_budget_tokens": 4096,
     "policy_enable_thinking": true,
@@ -73,9 +73,9 @@
   "teacher_assist": {
     "enabled": true,
     "modes": ["hint", "critique"],
-    "sample_prob_neither": 0.15,
-    "sample_prob_opp_only": 0.1,
-    "max_hint_tokens": 384
+    "sample_prob_neither": 0.3,
+    "sample_prob_opp_only": 0.2,
+    "max_hint_tokens": 1000
   },
   "data": {
     "train_path": "azr/data/train.jsonl"
