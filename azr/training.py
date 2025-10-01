@@ -84,34 +84,77 @@ def _default_examples() -> List[DataExample]:
     ]
 
 
-def _collect_logit_gates(model: nn.Module) -> List[nn.Module]:
-    gates: List[nn.Module] = []
-    seen: set[int] = set()
-    for module in model.modules():
-        gate = getattr(module, "logit_gate", None)
-        if gate is None:
-            continue
-        gate_id = id(gate)
-        if gate_id in seen:
-            continue
-        seen.add(gate_id)
-        gates.append(gate)
-    shared_gate = getattr(model, "logit_gate_shared", None)
-    if shared_gate is not None and id(shared_gate) not in seen:
-        gates.append(shared_gate)
-    return gates
+class _UniversalGateWarmupCallback(TrainerCallback):
+    _MIN_SCALE = 1e-6
 
+    def __init__(self, model: nn.Module, warmup_steps: int) -> None:
+        self._warmup_steps = max(1, int(warmup_steps))
+        self._alpha_modules: List[nn.Module] = []
+        self._scale_params: List[tuple[nn.Parameter, torch.Tensor]] = []
+        self._log_scale_params: List[tuple[nn.Parameter, torch.Tensor, torch.Tensor, torch.Tensor]] = []
+        self._layernorm_params: List[tuple[nn.Parameter, torch.Tensor]] = []
 
-class _LogitGateWarmupCallback(TrainerCallback):
-    def __init__(self, gates: List[nn.Module], warmup_steps: int) -> None:
-        self._gates = gates
-        self._warmup_steps = max(1, warmup_steps)
+        seen_params: set[int] = set()
+
+        for module in model.modules():
+            if hasattr(module, "set_warmup_alpha"):
+                self._alpha_modules.append(module)
+                continue
+
+            scale_param = getattr(module, "scale", None)
+            if isinstance(scale_param, nn.Parameter):
+                param_id = id(scale_param)
+                if param_id not in seen_params:
+                    self._scale_params.append((scale_param, scale_param.detach().clone()))
+                    seen_params.add(param_id)
+                continue
+
+            log_scale_param = getattr(module, "log_scale", None)
+            if isinstance(log_scale_param, nn.Parameter):
+                param_id = id(log_scale_param)
+                if param_id not in seen_params:
+                    original_log = log_scale_param.detach().clone()
+                    target_scale = torch.exp(original_log)
+                    min_scale = torch.full_like(target_scale, self._MIN_SCALE)
+                    min_log = torch.log(min_scale)
+                    self._log_scale_params.append(
+                        (log_scale_param, original_log, target_scale, min_log)
+                    )
+                    seen_params.add(param_id)
+                continue
+
+            is_layernorm = isinstance(module, nn.LayerNorm) or "rmsnorm" in module.__class__.__name__.lower()
+            if not is_layernorm:
+                continue
+            weight = getattr(module, "weight", None)
+            if isinstance(weight, nn.Parameter) and weight.requires_grad:
+                param_id = id(weight)
+                if param_id not in seen_params:
+                    self._layernorm_params.append((weight, weight.detach().clone()))
+                    seen_params.add(param_id)
+
+    def _alpha_for_step(self, step: int) -> float:
+        if self._warmup_steps <= 0:
+            return 1.0
+        return max(0.0, min(1.0, step / self._warmup_steps))
 
     def _apply(self, step: int) -> None:
-        alpha = min(1.0, max(0.0, step / self._warmup_steps))
-        for gate in self._gates:
-            if hasattr(gate, "set_warmup_alpha"):
-                gate.set_warmup_alpha(alpha)
+        alpha = self._alpha_for_step(step)
+        with torch.no_grad():
+            for module in self._alpha_modules:
+                module.set_warmup_alpha(alpha)
+            for param, original in self._scale_params:
+                param.data.copy_(original * alpha)
+            for param, original_log, target_scale, min_log in self._log_scale_params:
+                if alpha >= 1.0:
+                    param.data.copy_(original_log)
+                elif alpha <= 0.0:
+                    param.data.copy_(min_log)
+                else:
+                    scaled = torch.clamp(target_scale * alpha, min=self._MIN_SCALE)
+                    param.data.copy_(scaled.log())
+            for weight, original in self._layernorm_params:
+                weight.data.copy_(original * alpha + (1.0 - alpha))
 
     def on_train_begin(self, args, state, control, **kwargs):  # type: ignore[override]
         self._apply(getattr(state, "global_step", 0))
@@ -243,12 +286,10 @@ def build_trainer(
     # Align lm_head dtype with the model's parameters to avoid Float/BFloat16 errors.
     if hasattr(trainer, "add_callback"):
         trainer.add_callback(_EnsureLmHeadDtype())
-        attn_cfg = (config.get("ia3") or {}).get("attention_logit_gates", {})
-        warm_steps = int(attn_cfg.get("scale_warmup_steps", 0) or 0)
+        ia3_cfg = config.get("ia3") or {}
+        warm_steps = int(ia3_cfg.get("warmup_steps", 0) or 0)
         if warm_steps > 0:
-            gates = _collect_logit_gates(model)
-            if gates:
-                trainer.add_callback(_LogitGateWarmupCallback(gates, warm_steps))
+            trainer.add_callback(_UniversalGateWarmupCallback(model, warm_steps))
     return trainer
 
 

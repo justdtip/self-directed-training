@@ -23,6 +23,7 @@
   "ia3": {
     "enabled": true,
     "init_value": 1.0,
+    "warmup_steps": 1000,
     "per_layer_head_gates": true,
     "ffn_channel_gates": {
       "enabled": true,
@@ -36,8 +37,7 @@
       "per_layer": true,
       "shared": false,
       "target": "query",
-      "init_value": 1.0,
-      "scale_warmup_steps": 0
+      "init_value": 1.0
     },
     "residual_gates": {
       "enabled": true,
