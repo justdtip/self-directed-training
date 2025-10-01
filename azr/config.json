@@ -21,41 +21,55 @@
     "retry_temperature": 0.2
   },
   "ia3": {
-    "enabled": true,
+    "enabled": false,
     "init_value": 1.0,
     "warmup_steps": 1000,
-    "per_layer_head_gates": true,
+    "per_layer_head_gates": false,
     "ffn_channel_gates": {
-      "enabled": true,
+      "enabled": false,
       "group_size": 8,
       "target": "gate_proj",
       "init_value": 1.0
     },
+    "bitfit": {
+      "enabled": false
+    },
+    "prefix_prompts": {
+      "enabled": false,
+      "num_tokens": 12,
+      "freeze_steps": 0
+    },
+    "lora_mlp_down": {
+      "enabled": false,
+      "bottleneck": 4,
+      "init_value": 0.0
+    },
     "attention_logit_gates": {
-      "enabled": true,
-      "per_head": true,
-      "per_layer": true,
+      "enabled": false,
+      "per_head": false,
+      "per_layer": false,
       "shared": false,
       "target": "query",
-      "init_value": 1.0
+      "init_value": 1.0,
+      "scale_warmup_steps": null
     },
     "residual_gates": {
-      "enabled": true,
+      "enabled": false,
       "init_value": 1.0,
-      "post_ffn": true
+      "post_ffn": false
     },
     "projection_dim_gates": {
-      "enabled": true,
+      "enabled": false,
       "init_value": 1.0,
-      "input_enabled": true
+      "input_enabled": false
     },
     "rope_scale": {
-      "enabled": true,
-      "per_layer": true,
+      "enabled": false,
+      "per_layer": false,
       "init_value": 1.0
     },
     "layernorm_gamma": {
-      "enabled": true
+      "enabled": false
     }
   },
   "penalties": {

@@ -9,7 +9,7 @@ import torch
 
 from .tools.python_tool import run_code
 from .rewards import extract_last_code_block, score_code_tests
-from .modeling import load_tokenizer, setup_model
+from .modeling import load_tokenizer, setup_model, set_soft_prompt_role, enable_soft_prompts
 from .config import AzrModelCfg, AzrSelfPlayCfg
 from .opponent_provider_together import TogetherAIOpponentProvider
 from .openai_provider import OpenAIResponsesProvider
@@ -87,6 +87,8 @@ class SelfPlayManager:
             self.primary_device = None
         else:
             self.opponent = setup_model(cfg)
+            set_soft_prompt_role(self.opponent, 1)
+            enable_soft_prompts(self.opponent, True)
             print("[SelfPlay] Loaded local frozen opponent model")
             try:
                 params = self.opponent.parameters()
@@ -224,6 +226,8 @@ class SelfPlayManager:
                     key: value.to(embed_device) if hasattr(value, "to") else value
                     for key, value in inputs.items()
                 }
+                set_soft_prompt_role(self.opponent, 1)
+                enable_soft_prompts(self.opponent, True)
                 out = self.opponent.generate(
                     **inputs,
                     max_new_tokens=budget,

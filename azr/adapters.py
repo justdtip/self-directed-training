@@ -4,6 +4,31 @@ import torch
 from torch import nn
 
 
+class SoftPromptEmbedding(nn.Module):
+    """Learnable soft prompt embeddings per role."""
+
+    def __init__(self, num_roles: int, num_tokens: int, embed_dim: int) -> None:
+        super().__init__()
+        if num_roles <= 0:
+            raise ValueError("num_roles must be positive for SoftPromptEmbedding")
+        if num_tokens <= 0:
+            raise ValueError("num_tokens must be positive for SoftPromptEmbedding")
+        if embed_dim <= 0:
+            raise ValueError("embed_dim must be positive for SoftPromptEmbedding")
+        self.num_roles = int(num_roles)
+        self.num_tokens = int(num_tokens)
+        self.embed_dim = int(embed_dim)
+        self.embeds = nn.Parameter(
+            torch.randn(num_roles, num_tokens, embed_dim, dtype=torch.float32) * 0.01
+        )
+
+    def forward(self, role_id: int) -> torch.Tensor:
+        role = int(role_id)
+        if role < 0 or role >= self.num_roles:
+            raise IndexError(f"role_id {role} out of range for {self.num_roles} roles")
+        return self.embeds[role]
+
+
 def _maybe_to(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
     return tensor if tensor.device == device else tensor.to(device)
 
@@ -210,6 +235,29 @@ class RoPEScale(nn.Module):
     def forward(self, cos: torch.Tensor, sin: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         scale = _maybe_to(self.scale, cos.device)
         return cos * scale, sin * scale
+
+
+class LoRAMLPDownAdapter(nn.Module):
+    """Low-rank residual MLP adapter appended to FFN down projections."""
+
+    def __init__(self, hidden_dim: int, bottleneck: int, init_value: float = 0.0) -> None:
+        super().__init__()
+        if hidden_dim <= 0:
+            raise ValueError("hidden_dim must be positive for LoRAMLPDownAdapter")
+        if bottleneck <= 0:
+            raise ValueError("bottleneck must be positive for LoRAMLPDownAdapter")
+        self.fc1 = nn.Linear(hidden_dim, bottleneck, bias=False)
+        self.fc2 = nn.Linear(bottleneck, hidden_dim, bias=False)
+        self.act = nn.GELU()
+        self.log_scale = nn.Parameter(torch.tensor(float(init_value), dtype=torch.float32))
+
+    @property
+    def scale(self) -> torch.Tensor:
+        return torch.exp(self.log_scale)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        residual = self.fc2(self.act(self.fc1(x)))
+        return x + self.scale * residual
 
 
 def attach_ia3_gates(model: nn.Module, init_value: float = 1.0) -> None:
@@ -671,3 +719,37 @@ def attach_rope_scale(
     model.add_module(name, shared)
     for attn in attention_modules:
         setattr(attn, "_shared_rope_scale", shared)
+
+
+def attach_lora_mlp_down(
+    model: nn.Module,
+    bottleneck: int,
+    init_value: float = 0.0,
+) -> None:
+    """Attach LoRA-inspired MLP adapters onto down projection layers."""
+
+    if bottleneck <= 0:
+        raise ValueError("bottleneck must be positive when attaching LoRA MLP adapters")
+
+    for name, module in model.named_modules():
+        if not isinstance(module, nn.Linear):
+            continue
+        if not name.endswith("down_proj"):
+            continue
+        hidden_dim = module.out_features
+        adapter = LoRAMLPDownAdapter(hidden_dim, bottleneck, init_value)
+        original_forward = module.forward
+
+        def forward_with_adapter(
+            input: torch.Tensor,
+            *,
+            _orig=original_forward,
+            _adapter=adapter,
+        ) -> torch.Tensor:
+            out = _orig(input)
+            if _adapter.fc1.weight.device != out.device:
+                _adapter.to(out.device)
+            return _adapter(out)
+
+        module.forward = forward_with_adapter  # type: ignore[assignment]
+        setattr(module, "mlp_down_adapter", adapter)

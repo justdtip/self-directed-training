@@ -9,18 +9,17 @@ from inspect import signature
 from transformers import set_seed
 from transformers.trainer_callback import TrainerCallback
 import torch
-from torch import nn
 import random
 import re
 from trl.trainer.grpo_trainer import GRPOConfig
 
 from .config import AzrModelCfg, AzrSelfPlayCfg, AzrTrainingCfg, load_config
 from .data import load_dataset as load_data
-from .modeling import load_tokenizer, setup_model
+from .modeling import load_tokenizer, setup_model, set_soft_prompt_role, enable_soft_prompts
 from .rewards import blended_reward, score_code_tests
 from .selfplay_manager import SelfPlayManager
 from .trainer_overrides import GRPOTrainerWithStop
-from .callbacks import TrainingMetricsCallback
+from .callbacks import TrainingMetricsCallback, UnifiedWarmupCallback, SoftPromptSchedulerCallback
 from .generation_logger import GenerationLogger
 from .failure_logger import FailureLogger
 from .scoreboard import ScoreBoard
@@ -74,89 +73,6 @@ class _EnsureLmHeadDtype(TrainerCallback):
         if model is not None:
             self._align(model)
         return control
-
-
-
-class _UniversalGateWarmupCallback(TrainerCallback):
-    _MIN_SCALE = 1e-6
-
-    def __init__(self, model: nn.Module, warmup_steps: int) -> None:
-        self._warmup_steps = max(1, int(warmup_steps))
-        self._alpha_modules: List[nn.Module] = []
-        self._scale_params: List[tuple[nn.Parameter, torch.Tensor]] = []
-        self._log_scale_params: List[tuple[nn.Parameter, torch.Tensor, torch.Tensor, torch.Tensor]] = []
-        self._layernorm_params: List[tuple[nn.Parameter, torch.Tensor]] = []
-
-        seen_params: set[int] = set()
-
-        for module in model.modules():
-            if hasattr(module, "set_warmup_alpha"):
-                self._alpha_modules.append(module)
-                continue
-
-            scale_param = getattr(module, "scale", None)
-            if isinstance(scale_param, nn.Parameter):
-                param_id = id(scale_param)
-                if param_id not in seen_params:
-                    self._scale_params.append((scale_param, scale_param.detach().clone()))
-                    seen_params.add(param_id)
-                continue
-
-            log_scale_param = getattr(module, "log_scale", None)
-            if isinstance(log_scale_param, nn.Parameter):
-                param_id = id(log_scale_param)
-                if param_id not in seen_params:
-                    original_log = log_scale_param.detach().clone()
-                    target_scale = torch.exp(original_log)
-                    min_scale = torch.full_like(target_scale, self._MIN_SCALE)
-                    min_log = torch.log(min_scale)
-                    self._log_scale_params.append(
-                        (log_scale_param, original_log, target_scale, min_log)
-                    )
-                    seen_params.add(param_id)
-                continue
-
-            is_layernorm = isinstance(module, nn.LayerNorm) or "rmsnorm" in module.__class__.__name__.lower()
-            if not is_layernorm:
-                continue
-            weight = getattr(module, "weight", None)
-            if isinstance(weight, nn.Parameter) and weight.requires_grad:
-                param_id = id(weight)
-                if param_id not in seen_params:
-                    self._layernorm_params.append((weight, weight.detach().clone()))
-                    seen_params.add(param_id)
-
-    def _alpha_for_step(self, step: int) -> float:
-        if self._warmup_steps <= 0:
-            return 1.0
-        return max(0.0, min(1.0, step / self._warmup_steps))
-
-    def _apply(self, step: int) -> None:
-        alpha = self._alpha_for_step(step)
-        with torch.no_grad():
-            for module in self._alpha_modules:
-                module.set_warmup_alpha(alpha)
-            for param, original in self._scale_params:
-                param.data.copy_(original * alpha)
-            for param, original_log, target_scale, min_log in self._log_scale_params:
-                if alpha >= 1.0:
-                    param.data.copy_(original_log)
-                elif alpha <= 0.0:
-                    param.data.copy_(min_log)
-                else:
-                    scaled = torch.clamp(target_scale * alpha, min=self._MIN_SCALE)
-                    param.data.copy_(scaled.log())
-            for weight, original in self._layernorm_params:
-                weight.data.copy_(original * alpha + (1.0 - alpha))
-
-    def on_train_begin(self, args, state, control, **kwargs):
-        self._apply(getattr(state, "global_step", 0))
-        return control
-
-    def on_step_begin(self, args, state, control, **kwargs):
-        self._apply(getattr(state, "global_step", 0))
-        return control
-
 
 def _ensure_mapping(config: Any) -> Dict[str, Any]:
     if isinstance(config, Mapping):
@@ -217,6 +133,8 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         bf16=bf16_flag,
         ia3_cfg=cfg_map.get("ia3"),
     )
+    set_soft_prompt_role(model, 0)
+    enable_soft_prompts(model, True)
 
     # Disable KV caching when gradient checkpointing is enabled later.
     model_config = getattr(model, "config", None)
@@ -244,6 +162,8 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     "input_projection_gate",
                     "layernorm.weight",
                     "norm.weight",
+                    "mlp_down_adapter",
+                    "soft_prompt_embeddings",
                 )
             ):
                 param.requires_grad = True
@@ -297,6 +217,24 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
     projection_gate_total = 0
     rope_scale_total = 0
     layernorm_gamma_total = 0
+    mlp_down_total = 0
+    soft_prompt_total = 0
+    bitfit_total = 0
+    bitfit_per_kind: Dict[str, int] = {}
+    bitfit_tokens = {
+        ".q_proj.bias": "q_proj",
+        ".k_proj.bias": "k_proj",
+        ".v_proj.bias": "v_proj",
+        ".o_proj.bias": "o_proj",
+        ".gate_proj.bias": "gate_proj",
+        ".up_proj.bias": "up_proj",
+        ".down_proj.bias": "down_proj",
+        "lm_head.bias": "lm_head",
+    }
+    ia3_cfg_local = cfg_map.get("ia3") or {}
+    bitfit_cfg = ia3_cfg_local.get("bitfit") or {}
+    bitfit_enabled = bool(bitfit_cfg.get("enabled"))
+    include_lm_head_bias = bool(bitfit_cfg.get("include_lm_head_bias", False))
     if callable(named_params):
         lora_targets = tuple(getattr(model_cfg, "lora_target_modules", ()) or ())
         ia3_targets = ("q_proj", "k_proj", "v_proj", "o_proj")
@@ -340,6 +278,21 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     rope_scale_total += count
                 elif "norm.weight" in name:
                     layernorm_gamma_total += count
+                elif "mlp_down_adapter" in name:
+                    mlp_down_total += count
+                elif "soft_prompt_embeddings" in name:
+                    soft_prompt_total += count
+                elif bitfit_enabled and param.requires_grad and name.endswith("bias"):
+                    kind = None
+                    for token, label in bitfit_tokens.items():
+                        if token == "lm_head.bias" and not include_lm_head_bias:
+                            continue
+                        if token in name:
+                            kind = label
+                            break
+                    if kind:
+                        bitfit_total += count
+                        bitfit_per_kind[kind] = bitfit_per_kind.get(kind, 0) + count
     if total_params:
         pct = (trainable_params / total_params) * 100.0
         print(
@@ -369,6 +322,14 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         print(f"[RoPEScale] Trainable parameters: {rope_scale_total:,}")
     if layernorm_gamma_total:
         print(f"[LayerNorm] Trainable parameters: {layernorm_gamma_total:,}")
+    if mlp_down_total:
+        print(f"[LoRA-MLP] Trainable parameters: {mlp_down_total:,}")
+    if soft_prompt_total:
+        print(f"[SoftPrompt] Trainable parameters: {soft_prompt_total:,}")
+    if bitfit_total:
+        print(f"[BitFit] Trainable bias parameters: {bitfit_total:,}")
+        for kind, count in sorted(bitfit_per_kind.items()):
+            print(f"[BitFit]   {kind}: {count:,}")
 
     max_prompt_len = int(rlhf_cfg["max_prompt_length"])
     base_completion_len = int(rlhf_cfg["max_completion_length"])
@@ -1129,9 +1090,14 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         trainer_kwargs["processing_class"] = tokenizer
     trainer = GRPOTrainer(**trainer_kwargs)
     ia3_cfg = cfg_map.get("ia3") or {}
-    warm_steps = int(ia3_cfg.get("warmup_steps", 0) or 0)
-    if warm_steps > 0 and hasattr(trainer, "add_callback"):
-        trainer.add_callback(_UniversalGateWarmupCallback(model, warm_steps))
+    warm_steps_config = cfg_map.get("warmup_steps")
+    warm_steps_value = warm_steps_config if warm_steps_config is not None else ia3_cfg.get("warmup_steps", 0)
+    warm_steps = int(warm_steps_value or 0)
+    if hasattr(trainer, "add_callback") and warm_steps > 0:
+        trainer.add_callback(UnifiedWarmupCallback(model, warm_steps))
+    if hasattr(trainer, "add_callback") and getattr(model, "_soft_prompt_wrapped", False):
+        freeze_steps = getattr(model, "soft_prompt_freeze_steps", 0)
+        trainer.add_callback(SoftPromptSchedulerCallback(model, int(freeze_steps or 0)))
     trainer.gen_logger = gen_logger
     trainer.scoreboard = scoreboard
     trainer.log_options = {
