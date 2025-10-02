@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 
@@ -36,39 +38,74 @@ def _maybe_to(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
 class IA3Gate(nn.Module):
     """Per-channel multiplicative gate used for IA³ adapters."""
 
-    def __init__(self, init_value: float = 1.0) -> None:
+    def __init__(self, dim: int, init_log_scale: float = 0.0, clamp_min: float = 0.9, clamp_max: float = 1.1) -> None:
         super().__init__()
-        self.scale = nn.Parameter(torch.tensor(init_value, dtype=torch.float32))
+        if dim <= 0:
+            raise ValueError("dim must be positive for IA3Gate")
+        init_value = torch.full((dim,), float(init_log_scale), dtype=torch.float32)
+        self.log_scale = nn.Parameter(init_value)
+        self.clamp_min = float(clamp_min)
+        self.clamp_max = float(clamp_max)
+
+    def set_warmup_alpha(self, alpha: float) -> None:
+        alpha = float(max(0.0, min(1.0, alpha)))
+        lo = 1.0 - (1.0 - self.clamp_min) * (1.0 - alpha)
+        hi = 1.0 + (self.clamp_max - 1.0) * (1.0 - alpha)
+        self.clamp_min = float(lo)
+        self.clamp_max = float(hi)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x * self.scale
+        if __debug__ and x.dim() < 1:
+            raise AssertionError("IA3Gate expects tensor with at least 1 dimension")
+        scale = self.log_scale.to(dtype=x.dtype, device=x.device).exp()
+        scale = torch.clamp(scale, float(self.clamp_min), float(self.clamp_max))
+        return x * scale
 
 
 class IA3HeadGate(nn.Module):
     """Per-head multiplicative gate applied within attention projections."""
 
-    def __init__(self, num_heads: int, init_value: float = 1.0) -> None:
+    def __init__(self, num_heads: int, init_log_scale: float = 0.0, clamp_min: float = 0.9, clamp_max: float = 1.1) -> None:
         super().__init__()
         if num_heads <= 0:
             raise ValueError("num_heads must be positive for IA3HeadGate")
-        self.scale = nn.Parameter(
-            torch.full((num_heads,), float(init_value), dtype=torch.float32)
-        )
+        init_value = torch.full((num_heads,), float(init_log_scale), dtype=torch.float32)
+        self.log_scale = nn.Parameter(init_value)
+        self.clamp_min = float(clamp_min)
+        self.clamp_max = float(clamp_max)
+
+    def set_warmup_alpha(self, alpha: float) -> None:
+        alpha = float(max(0.0, min(1.0, alpha)))
+        lo = 1.0 - (1.0 - self.clamp_min) * (1.0 - alpha)
+        hi = 1.0 + (self.clamp_max - 1.0) * (1.0 - alpha)
+        self.clamp_min = float(lo)
+        self.clamp_max = float(hi)
+
+    def effective_scale(self, like: torch.Tensor) -> torch.Tensor:
+        scale = self.log_scale.to(dtype=like.dtype, device=like.device).exp()
+        return torch.clamp(scale, float(self.clamp_min), float(self.clamp_max))
+
+    def apply_to_heads(self, x: torch.Tensor) -> torch.Tensor:
+        # Expect x shaped [..., num_heads, head_dim]
+        if __debug__ and x.dim() < 2:
+            raise AssertionError("IA3HeadGate expects tensor shaped [..., num_heads, head_dim]")
+        scale = self.effective_scale(x)
+        view_shape = (1,) * (x.dim() - 2) + (scale.numel(), 1)
+        return x * scale.view(view_shape)
 
     def forward(self, x: torch.Tensor, head_dim: int) -> torch.Tensor:
+        if __debug__ and x.dim() < 2:
+            raise AssertionError("IA3HeadGate forward expects tensor shaped [..., num_heads*head_dim]")
         if head_dim <= 0:
             return x
-        num_heads = self.scale.shape[0]
+        num_heads = self.log_scale.shape[0]
         last_dim = x.shape[-1]
         expected = num_heads * head_dim
         if last_dim != expected:
             return x
         new_shape = (*x.shape[:-1], num_heads, head_dim)
         x = x.reshape(new_shape)
-        scale_shape = (1,) * (x.dim() - 2) + (num_heads, 1)
-        scale = self.scale.view(*scale_shape)
-        scale = _maybe_to(scale, x.device)
-        x = x * scale
+        x = self.apply_to_heads(x)
         return x.reshape(*x.shape[:-2], expected)
 
 
@@ -260,32 +297,100 @@ class LoRAMLPDownAdapter(nn.Module):
         return x + self.scale * residual
 
 
-def attach_ia3_gates(model: nn.Module, init_value: float = 1.0) -> None:
-    """Attach IA³ gates to attention projection layers in ``model``.
+def _get_module_by_path(model: nn.Module, path: str) -> nn.Module:
+    module = model
+    if not path:
+        return module
+    for attr in path.split("."):
+        module = getattr(module, attr)
+    return module
 
-    The gate is applied after q/k/v/o projection layers so their outputs are
-    scaled by a learned factor. Existing forwards are wrapped in-place and the
-    gate module is stored on the projection for later parameter filtering.
-    """
 
-    target_tags = ("q_proj", "k_proj", "v_proj", "o_proj")
+def attach_ia3_gates(
+    model: nn.Module,
+    init_value: float = 1.0,
+    *,
+    clamp_min: float = 0.9,
+    clamp_max: float = 1.1,
+    targets: set[str] | None = None,
+    post_rope_qk: bool = True,
+) -> None:
+    """Attach IA³ projection gates based on configured targets."""
+
+    valid_suffixes = {"q_proj", "k_proj", "v_proj", "o_proj"}
+    if targets is None:
+        targets = set(valid_suffixes)
+    targets = {str(t).lower() for t in targets}
+    targets &= valid_suffixes
+    if not targets:
+        return
+
+    init_base = max(float(init_value), 1e-6)
+    try:
+        init_log = float(math.log(init_base))
+    except Exception:
+        init_log = 0.0
 
     for name, module in model.named_modules():
         if not isinstance(module, nn.Linear):
             continue
-        if not any(tag in name for tag in target_tags):
+        suffix = name.split(".")[-1]
+        if suffix not in targets:
             continue
 
-        gate = IA3Gate(init_value)
-        original_forward = module.forward
+        parent_name = name.rsplit(".", 1)[0] if "." in name else ""
+        parent_module = _get_module_by_path(model, parent_name)
+        total_heads = _infer_attention_heads(parent_module)
+        if not total_heads:
+            continue
 
-        def gated_forward(input: torch.Tensor, *, _orig=original_forward, _gate=gate):
-            if input.device != gate.scale.device:
-                gate.to(input.device)
-            return _orig(input) * _gate.scale
+        kv_heads = getattr(parent_module, "num_key_value_heads", None)
+        if suffix in {"k_proj", "v_proj"} and kv_heads:
+            heads = int(kv_heads)
+        else:
+            heads = int(total_heads)
+        if heads <= 0:
+            continue
 
-        module.forward = gated_forward  # type: ignore[assignment]
-        setattr(module, "ia3_gate", gate)
+        out_dim = module.out_features
+        if out_dim % heads != 0:
+            continue
+        head_dim = out_dim // heads
+        if head_dim <= 0:
+            continue
+
+        if suffix in {"v_proj", "o_proj"} or (suffix in {"q_proj", "k_proj"} and not post_rope_qk):
+            gate = IA3HeadGate(
+                heads,
+                init_log_scale=init_log,
+                clamp_min=clamp_min,
+                clamp_max=clamp_max,
+            )
+            original_forward = module.forward
+
+            def gated_forward(
+                input: torch.Tensor,
+                *,
+                _orig=original_forward,
+                _gate=gate,
+                _hd=head_dim,
+            ) -> torch.Tensor:
+                out = _orig(input)
+                if out.device != _gate.log_scale.device:
+                    _gate.to(out.device)
+                return _gate(out, _hd)
+
+            module.forward = gated_forward  # type: ignore[assignment]
+            setattr(module, "ia3_head_gate", gate)
+        elif suffix in {"q_proj", "k_proj"} and post_rope_qk:
+            gate = IA3HeadGate(
+                heads,
+                init_log_scale=init_log,
+                clamp_min=clamp_min,
+                clamp_max=clamp_max,
+            )
+            attr_name = f"ia3_head_gate_{suffix}_post"
+            setattr(parent_module, attr_name, gate)
 
 
 def attach_per_layer_head_gates(
@@ -293,48 +398,123 @@ def attach_per_layer_head_gates(
     num_heads: int,
     init_value: float = 1.0,
     num_kv_heads: int | None = None,
+    *,
+    clamp_min: float = 0.9,
+    clamp_max: float = 1.1,
+    targets: set[str] | None = None,
+    post_rope_qk: bool = True,
 ) -> None:
-    """Attach per-layer IA³ head gates to attention projection layers."""
+    """Attach per-layer IA³ head gates to attention projections respecting targets."""
 
     if num_heads <= 0:
         raise ValueError("num_heads must be positive when attaching head gates")
+    valid_suffixes = {"q_proj", "k_proj", "v_proj", "o_proj"}
+    if targets is None:
+        targets = set(valid_suffixes)
+    targets = {str(t).lower() for t in targets}
+    targets &= valid_suffixes
+    if not targets:
+        return
+
     kv_heads = num_kv_heads or num_heads
-    target_tags = ("q_proj", "k_proj", "v_proj", "o_proj")
+    init_base = max(float(init_value), 1e-6)
+    try:
+        init_log = float(math.log(init_base))
+    except Exception:
+        init_log = 0.0
 
     for name, module in model.named_modules():
         if not isinstance(module, nn.Linear):
             continue
-        if not any(tag in name for tag in target_tags):
+        suffix = name.split(".")[-1]
+        if suffix not in targets:
             continue
 
-        if "k_proj" in name or "v_proj" in name:
-            heads = kv_heads
+        if suffix in {"k_proj", "v_proj"}:
+            heads = int(kv_heads)
         else:
-            heads = num_heads
+            heads = int(num_heads)
         if heads <= 0:
             continue
 
-        head_dim = module.out_features // heads
-        if head_dim <= 0 or module.out_features % heads != 0:
+        out_dim = module.out_features
+        if out_dim % heads != 0:
+            continue
+        head_dim = out_dim // heads
+        if head_dim <= 0:
             continue
 
-        gate = IA3HeadGate(heads, init_value)
+        parent_name = name.rsplit(".", 1)[0] if "." in name else ""
+        parent_module = _get_module_by_path(model, parent_name)
+
+        if suffix in {"v_proj", "o_proj"} or (suffix in {"q_proj", "k_proj"} and not post_rope_qk):
+            gate = IA3HeadGate(
+                heads,
+                init_log_scale=init_log,
+                clamp_min=clamp_min,
+                clamp_max=clamp_max,
+            )
+            original_forward = module.forward
+
+            def gated_forward(
+                input: torch.Tensor,
+                *,
+                _orig=original_forward,
+                _gate=gate,
+                _hd=head_dim,
+            ) -> torch.Tensor:
+                out = _orig(input)
+                if out.device != _gate.log_scale.device:
+                    _gate.to(out.device)
+                return _gate(out, _hd)
+
+            module.forward = gated_forward  # type: ignore[assignment]
+            setattr(module, "ia3_head_gate", gate)
+        elif suffix in {"q_proj", "k_proj"} and post_rope_qk:
+            gate = IA3HeadGate(
+                heads,
+                init_log_scale=init_log,
+                clamp_min=clamp_min,
+                clamp_max=clamp_max,
+            )
+            attr_name = f"ia3_head_gate_{suffix}_post"
+            setattr(parent_module, attr_name, gate)
+
+
+def attach_ia3_ffn_down_gates(
+    model: nn.Module,
+    init_value: float = 1.0,
+    *,
+    clamp_min: float = 0.9,
+    clamp_max: float = 1.1,
+) -> None:
+    """Attach IA³ gates to FFN down projections."""
+
+    init_base = max(float(init_value), 1e-6)
+    try:
+        init_log = float(math.log(init_base))
+    except Exception:
+        init_log = 0.0
+
+    for name, module in model.named_modules():
+        if not isinstance(module, nn.Linear):
+            continue
+        if not name.endswith("down_proj"):
+            continue
+        dim = module.out_features
+        if dim <= 0:
+            continue
+        gate = IA3Gate(dim, init_log_scale=init_log, clamp_min=clamp_min, clamp_max=clamp_max)
         original_forward = module.forward
 
-        def gated_forward(
-            input: torch.Tensor,
-            *,
-            _orig=original_forward,
-            _gate=gate,
-            _hd=head_dim,
-        ) -> torch.Tensor:
-            if input.device != gate.scale.device:
-                gate.to(input.device)
+        def gated_forward(input: torch.Tensor, *, _orig=original_forward, _gate=gate):
             out = _orig(input)
-            return _gate(out, _hd)
+            if out.device != _gate.log_scale.device:
+                _gate.to(out.device)
+            return _gate(out)
 
         module.forward = gated_forward  # type: ignore[assignment]
-        setattr(module, "ia3_head_gate", gate)
+        setattr(module, "ia3_gate", gate)
 
 
 def attach_ffn_gates(

@@ -74,9 +74,25 @@ def build_retry_messages(user_prompt: str, hint: str, allow_thinking: bool = Fal
     ]
 
 
+def build_solution_messages(user_prompt: str, allow_thinking: bool = False) -> List[Dict[str, object]]:
+    """Construct a Responses-style messages payload for the teacher model (full solution)."""
+
+    return [
+        {
+            "role": "system",
+            "content": [{"type": "input_text", "text": format_system_prompt(allow_thinking)}],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": user_prompt}],
+        },
+    ]
+
+
 __all__ = [
     "format_system_prompt",
     "CODE_GATE_SYSTEM_NUDGE",
     "build_assist_messages",
     "build_retry_messages",
+    "build_solution_messages",
 ]

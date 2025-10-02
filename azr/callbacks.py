@@ -127,6 +127,12 @@ class UnifiedWarmupCallback(TrainerCallback):
                     param.data.copy_(scaled.log())
             for weight, original in self._layernorm_params:
                 weight.data.copy_(original * alpha + (1.0 - alpha))
+            for module in self._alpha_modules:
+                if hasattr(module, "set_warmup_alpha"):
+                    try:
+                        module.set_warmup_alpha(alpha)
+                    except Exception:
+                        continue
 
     def on_train_begin(self, args, state, control, **kwargs):  # type: ignore[override]
         self._apply(getattr(state, "global_step", 0))

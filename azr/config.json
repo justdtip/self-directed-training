@@ -21,8 +21,12 @@
     "retry_temperature": 0.2
   },
   "ia3": {
-    "enabled": false,
+    "enabled": true,
     "init_value": 1.0,
+    "targets": ["v_proj", "ffn_down"],
+    "clamp_min": 0.9,
+    "clamp_max": 1.1,
+    "safe_mode": true,
     "warmup_steps": 1000,
     "per_layer_head_gates": false,
     "ffn_channel_gates": {
@@ -37,7 +41,7 @@
     "prefix_prompts": {
       "enabled": false,
       "num_tokens": 12,
-      "freeze_steps": 0
+      "freeze_steps": 100
     },
     "lora_mlp_down": {
       "enabled": false,
@@ -101,7 +105,7 @@
     "opponent": {
       "source": "remote",
       "provider": "together_ai",
-      "model_id": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+      "model_id": "deepseek-ai/DeepSeek-R1-0528-tput",
       "endpoint": "https://api.together.ai/v1/chat/completions",
       "api_key_env": "TOGETHER_API_KEY",
       "max_concurrency": 8,
@@ -123,11 +127,18 @@
     }
   },
   "teacher_assist": {
-    "enabled": true,
+    "enabled": false,
     "modes": ["hint", "critique"],
     "sample_prob_neither": 0.3,
     "sample_prob_opp_only": 0.2,
     "max_hint_tokens": 1000
+  },
+  "teacher_solve": {
+    "enabled": true,
+    "prob": 1.0,
+    "method": "replace",
+    "max_tokens": 1024,
+    "max_failures": 0
   },
   "data": {
     "train_path": "azr/data/train.jsonl"

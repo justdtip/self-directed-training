@@ -253,6 +253,20 @@ class SelfPlayManager:
                 formatted.append(prompt)
         return asyncio.run(self.teacher_provider.agenerate(formatted, max_tokens))
 
+    def teacher_solve(self, prompts: List[object], max_tokens: int) -> List[str]:
+        """Request full solutions from the teacher provider using strict system prompts."""
+
+        if self.teacher_provider is None:
+            return ["" for _ in prompts]
+        formatted: List[object] = []
+        accepts_structured = bool(getattr(self.teacher_provider, "accepts_structured_prompts", False))
+        for prompt in prompts:
+            if isinstance(prompt, list) and not accepts_structured:
+                formatted.append(_flatten_messages(prompt))
+            else:
+                formatted.append(prompt)
+        return asyncio.run(self.teacher_provider.agenerate(formatted, max_tokens))
+
     def compute_scores(
         self,
         policy_outs: List[str],

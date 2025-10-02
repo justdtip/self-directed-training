@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import math
 from typing import Any, Dict, List, Optional
 
 import torch
+from torch import nn
 from trl.trainer.grpo_trainer import GRPOConfig, GRPOTrainer
 from transformers.trainer_callback import TrainerCallback
 
@@ -33,6 +35,47 @@ class _EnsureLmHeadDtype(TrainerCallback):
         model = kwargs.get("model")
         if model is not None:
             self._align(model)
+        return control
+
+
+class _IA3DebugCallback(TrainerCallback):
+    def __init__(self, model: torch.nn.Module, interval: int = 50) -> None:
+        self._model = model
+        self._interval = max(1, int(interval))
+
+    def on_step_end(self, args, state, control, **kwargs):  # type: ignore[override]
+        step = getattr(state, "global_step", None)
+        if step is None or step <= 0 or step % self._interval != 0:
+            return control
+        entropies: List[float] = []
+        for module in self._model.modules():
+            gates: List[nn.Module] = []
+            gate = getattr(module, "ia3_head_gate", None)
+            if gate is not None:
+                gates.append(gate)
+            for attr in ("ia3_head_gate_q_proj_post", "ia3_head_gate_k_proj_post"):
+                extra_gate = getattr(module, attr, None)
+                if extra_gate is not None:
+                    gates.append(extra_gate)
+            for g in gates:
+                if not hasattr(g, "log_scale"):
+                    continue
+                log_scale = g.log_scale.detach().to(torch.float32)
+                clamp_min = float(getattr(g, "clamp_min", 0.0))
+                clamp_max = float(getattr(g, "clamp_max", 0.0))
+                scale = log_scale.exp().clamp(clamp_min, clamp_max)
+                sum_scale = float(scale.sum())
+                if not math.isfinite(sum_scale) or sum_scale <= 0.0:
+                    continue
+                probs = (scale / sum_scale).clamp_min(1e-8)
+                entropy = float(-(probs * probs.log()).sum())
+                entropies.append(entropy)
+        if entropies:
+            mean_entropy = sum(entropies) / len(entropies)
+            print(
+                f"[IA3] step={step} entropy min={min(entropies):.4f} "
+                f"mean={mean_entropy:.4f} max={max(entropies):.4f}"
+            )
         return control
 
     def on_step_begin(self, args, state, control, **kwargs):  # type: ignore[override]
@@ -216,6 +259,10 @@ def build_trainer(
         if getattr(model, "_soft_prompt_wrapped", False):
             freeze_steps = getattr(model, "soft_prompt_freeze_steps", 0)
             trainer.add_callback(SoftPromptSchedulerCallback(model, int(freeze_steps or 0)))
+        if ia3_cfg.get("enabled"):
+            interval = int(ia3_cfg.get("entropy_log_interval", 50))
+            if interval > 0:
+                trainer.add_callback(_IA3DebugCallback(model, interval=interval))
     return trainer
 
 

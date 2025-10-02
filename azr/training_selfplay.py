@@ -28,6 +28,7 @@ from .prompts_assist import (
     CODE_GATE_SYSTEM_NUDGE,
     build_assist_messages,
     build_retry_messages,
+    build_solution_messages,
     format_system_prompt,
 )
 from .codegate import (
@@ -529,6 +530,14 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             _ = completion_ids
         state = trainer_state
         metadata = metadata or [{} for _ in completions]
+        teacher_solve_cfg = cfg_map.get("teacher_solve", {}) or {}
+        solve_enabled = bool(teacher_solve_cfg.get("enabled", False))
+        solve_prob = float(teacher_solve_cfg.get("prob", 0.0))
+        solve_method = str(teacher_solve_cfg.get("method", "replace")) or "replace"
+        solve_method = solve_method.lower()
+        solve_max_tokens = int(teacher_solve_cfg.get("max_tokens", 1024))
+        max_failures = max(0, int(teacher_solve_cfg.get("max_failures", 0)))
+        micro_sft_buffer: List[tuple[str, str]] = []
 
         def _normalize_step(value) -> Optional[int]:
             if value is None:
@@ -599,6 +608,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
         step_id = getattr(state, "global_step", None)
         base_scores: List[float] = []
         policy_pass_flags: List[bool] = []
+        policy_exec_stats: List[Dict[str, Any]] = []
         for idx, (prompt_text, output, meta) in enumerate(zip(prompts, completions, metadata)):
             score, stats = blended_reward(
                 output,
@@ -624,6 +634,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
             else:
                 policy_pass = float(stats.get("base", 0.0)) >= 1.0
             policy_pass_flags.append(policy_pass)
+            policy_exec_stats.append(stats)
             if gen_logger is not None:
                 payload = {
                     "ts": time.time(),
@@ -757,7 +768,127 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     except Exception:
                         pass
 
-                if assist_cfg.get("enabled", False) and teacher_provider is not None:
+                teacher_solved = False
+                teacher_provider = getattr(sp_manager, "teacher_provider", None)
+                if (
+                    solve_enabled
+                    and teacher_provider is not None
+                    and policy_pass_flags[idx] is False
+                    and random.random() < solve_prob
+                ):
+                    prior_failures = int(meta.get("hint_retries", 0))
+                    failure_stats = policy_exec_stats[idx]
+                    fail_reason = failure_stats.get("reason") if isinstance(failure_stats, dict) else None
+                    is_format_error = fail_reason == "format_error"
+                    if prior_failures >= max_failures or max_failures == 0:
+                        assist_user_prompt_parts: List[str] = []
+                        user_orig = meta.get("orig_prompt", prompts[idx])
+                        assist_user_prompt_parts.append(f"Problem:\n{user_orig}")
+                        tests_list = meta.get("tests", [])
+                        if tests_list:
+                            assist_user_prompt_parts.append(
+                                "Tests (must all pass):\n" + "\n".join(tests_list)
+                            )
+                        solve_prompt = "\n\n".join(assist_user_prompt_parts)
+                        try:
+                            solution_msgs = build_solution_messages(solve_prompt, allow_thinking=False)
+                            teacher_solution = sp_manager.teacher_solve(
+                                [solution_msgs], solve_max_tokens
+                            )[0]
+                        except Exception as exc:
+                            teacher_solution = ""
+                            solve_error = str(exc)
+                            teacher_score = 0.0
+                            teacher_stats = {"reason": "teacher_error", "error": solve_error}
+                        else:
+                            solve_error = None
+                            try:
+                                if not isinstance(teacher_solution, str) or not teacher_solution.strip():
+                                    raise CodeGateError("Teacher solution was empty")
+                                code_block = extract_last_python_block(teacher_solution)
+                                if not isinstance(code_block, str) or not code_block.strip():
+                                    raise CodeGateError("No Python code block found in teacher solution")
+                                func_name = meta.get("func_name")
+                                if func_name and not has_function_signature(code_block, func_name):
+                                    raise CodeGateError(
+                                        f"Function '{func_name}' not found in code block."
+                                    )
+                            except CodeGateError as cg_err:
+                                teacher_score = 0.0
+                                teacher_stats = {"reason": "teacher_codegate", "error": str(cg_err)}
+                            else:
+                                teacher_score, teacher_stats = blended_reward(
+                                    teacher_solution,
+                                    tests_list,
+                                    {
+                                        "timeout_s": meta.get("timeout_s", 2),
+                                        "memory_mb": meta.get("memory_mb", 256),
+                                        "stderr": meta.get("stderr", ""),
+                                    },
+                                    collect_exec=log_executor_output,
+                                    exec_store=exec_store,
+                                    exec_max_bytes=exec_truncate_bytes,
+                                )
+                                teacher_score = max(0.0, min(1.0, teacher_score))
+
+                        success = teacher_score >= 1.0
+                        if success and solve_method == "replace":
+                            completions[idx] = teacher_solution
+                            base_scores[idx] = teacher_score
+                            policy_pass_flags[idx] = True
+                            policy_exec_stats[idx] = dict(teacher_stats)
+                            policy_exec_stats[idx]["base"] = teacher_score
+                            combined[idx] = (1.0 - weight) * base_scores[idx] + weight * sp_scores[idx]
+                            meta["teacher_solution"] = teacher_solution
+                            teacher_solved = True
+                        elif success and solve_method == "sft":
+                            micro_sft_buffer.append((prompts[idx], teacher_solution))
+
+                        if gen_logger is not None:
+                            solve_payload = {
+                                "ts": time.time(),
+                                "source": "teacher_solve",
+                                "step": step_id,
+                                "prompt": prompts[idx],
+                                "solution": teacher_solution,
+                                "score": teacher_score,
+                                "passed": success,
+                                "metadata": dict(meta),
+                            }
+                            if log_executor_output and isinstance(teacher_stats, dict) and "exec_traces" in teacher_stats:
+                                solve_payload["exec_traces"] = teacher_stats["exec_traces"]
+                            if solve_error:
+                                solve_payload["error"] = solve_error
+                            gen_logger.log(solve_payload)
+
+                        metrics_record = {
+                            "source": "teacher_solve",
+                            "step": _normalize_step(step_id),
+                            "passed": bool(success),
+                            "score": float(teacher_score),
+                            "func_name": meta.get("func_name"),
+                        }
+                        if not success:
+                            reason = "teacher_failed"
+                            if isinstance(teacher_stats, dict):
+                                reason = teacher_stats.get("reason", "teacher_failed") or "teacher_failed"
+                            metrics_record["reason"] = reason
+                            if hasattr(trainer, "failure_logger"):
+                                try:
+                                    trainer.failure_logger.log(
+                                        {
+                                            "prompt": prompts[idx],
+                                            "tests": tests_list,
+                                            "timeout_s": meta.get("timeout_s", 2),
+                                            "memory_mb": meta.get("memory_mb", 256),
+                                            "kind": "teacher_solve_failed",
+                                        }
+                                    )
+                                except Exception:
+                                    pass
+                        append_jsonl(metrics_path, metrics_record)
+
+                if assist_cfg.get("enabled", False) and teacher_provider is not None and not teacher_solved:
                     neither = (not policy_pass_flags[idx]) and (not opponent_pass_flags[-1])
                     opp_only = (not policy_pass_flags[idx]) and opponent_pass_flags[-1]
                     trigger = False
@@ -953,6 +1084,7 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                                 "func_name": meta.get("func_name"),
                                 "retries": int(max(0, retries_used)),
                             }
+                            meta["hint_retries"] = int(max(0, retries_used))
                             assist_reason = _classify_reason(retry_stats, policy_pass_flags[idx], meta)
                             if assist_reason:
                                 metrics_record["reason"] = assist_reason
@@ -1053,6 +1185,11 @@ def build_trainer(config: Any, *, max_steps: int | None = None) -> GRPOTrainer:
                     f"weight={weight}"
                 )
             return combined
+
+        if solve_method == "sft" and micro_sft_buffer:
+            print(
+                f"[TeacherSolve] Collected {len(micro_sft_buffer)} teacher solutions for SFT (not yet applied)."
+            )
 
         if log_intersteps and base_scores:
             print(f"[Stage] reward_fn return base score={base_scores[0]:.4f}")

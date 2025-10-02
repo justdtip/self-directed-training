@@ -10,7 +10,7 @@
   "is_world_process_zero": true,
   "log_history": [],
   "logging_steps": 1,
-  "max_steps": 1,
+  "max_steps": 2,
   "num_input_tokens_seen": 0,
   "num_train_epochs": 1,
   "save_steps": 500,

@@ -10,15 +10,16 @@ import torch.nn as nn
 from .config import AzrModelCfg
 from .utils import console
 from .adapters import (
+    SoftPromptEmbedding,
     attach_attention_logit_gates,
     attach_ffn_gates,
+    attach_ia3_ffn_down_gates,
     attach_ia3_gates,
+    attach_lora_mlp_down,
     attach_per_layer_head_gates,
     attach_projection_dim_gates,
     attach_residual_gates,
     attach_rope_scale,
-    SoftPromptEmbedding,
-    attach_lora_mlp_down,
 )
 
 
@@ -93,8 +94,37 @@ def setup_model(
     prefix_cfg = None
     if ia3_cfg and ia3_cfg.get("enabled"):
         init_value = float(ia3_cfg.get("init_value", 1.0))
-        attach_ia3_gates(model, init_value)
-        trainable_markers.append("ia3_gate")
+        safe_mode = bool(ia3_cfg.get("safe_mode", False))
+        base_clamp_min = float(ia3_cfg.get("clamp_min", 0.9))
+        base_clamp_max = float(ia3_cfg.get("clamp_max", 1.1))
+        targets_cfg = ia3_cfg.get("targets", ["v_proj", "ffn_down"])
+        if safe_mode:
+            targets_cfg = ["v_proj", "ffn_down"]
+            clamp_min = 0.95
+            clamp_max = 1.05
+        else:
+            clamp_min = base_clamp_min
+            clamp_max = base_clamp_max
+        ia3_targets = {str(t).lower() for t in targets_cfg}
+        proj_targets = {t for t in ia3_targets if t in {"q_proj", "k_proj", "v_proj", "o_proj"}}
+        if proj_targets:
+            attach_ia3_gates(
+                model,
+                init_value,
+                clamp_min=clamp_min,
+                clamp_max=clamp_max,
+                targets=proj_targets,
+                post_rope_qk=True,
+            )
+            trainable_markers.append("ia3_head_gate")
+        if "ffn_down" in ia3_targets:
+            attach_ia3_ffn_down_gates(
+                model,
+                init_value,
+                clamp_min=clamp_min,
+                clamp_max=clamp_max,
+            )
+            trainable_markers.append("ia3_gate")
         bitfit_cfg = ia3_cfg.get("bitfit")
         prefix_cfg = ia3_cfg.get("prefix_prompts")
 
@@ -109,6 +139,10 @@ def setup_model(
                     int(num_heads),
                     init_value,
                     int(kv_heads) if kv_heads else None,
+                    clamp_min=clamp_min,
+                    clamp_max=clamp_max,
+                    targets=proj_targets,
+                    post_rope_qk=True,
                 )
                 trainable_markers.append("ia3_head_gate")
             else:
@@ -341,6 +375,9 @@ def _ensure_soft_prompt_wrapper(model: nn.Module) -> None:
         batch_size = inputs_embeds.shape[0]
 
         role_tensor = role_tensor.to(inputs_embeds.device)
+        if prompts.embeds.device != inputs_embeds.device:
+            prompts = prompts.to(inputs_embeds.device)
+            setattr(model, "soft_prompt_embeddings", prompts)
         if role_tensor.dim() == 0:
             role_tensor = role_tensor.expand(batch_size)
         elif role_tensor.shape[0] != batch_size:
